@@ -43,7 +43,6 @@ def _ytdlp_extract_info(url: str, download: bool = False) -> dict:
         "--js-runtimes", "node",
         "--dump-json",
         "--no-warnings",
-        "--format", "ba/b",
     ]
     if os.path.exists(COOKIES_FILE):
         cmd.extend(["--cookies", COOKIES_FILE])
@@ -54,7 +53,24 @@ def _ytdlp_extract_info(url: str, download: bool = False) -> dict:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if result.returncode != 0:
         raise Exception(result.stderr.strip() or "yt-dlp failed")
-    return _json.loads(result.stdout)
+    data = _json.loads(result.stdout)
+
+    # If formats exist but no direct url, pick best audio
+    if "formats" in data and not data.get("url"):
+        audio_fmts = [f for f in data["formats"] if f.get("acodec") != "none" and f.get("vcodec") == "none"]
+        if audio_fmts:
+            best = max(audio_fmts, key=lambda f: f.get("abr", 0) or 0)
+            data["url"] = best["url"]
+            data["ext"] = best.get("ext", "mp3")
+    # If still no url, try formats with any audio
+    if "formats" in data and not data.get("url"):
+        audio_fmts = [f for f in data["formats"] if f.get("acodec") != "none"]
+        if audio_fmts:
+            best = max(audio_fmts, key=lambda f: f.get("abr", 0) or 0)
+            data["url"] = best["url"]
+            data["ext"] = best.get("ext", "mp3")
+
+    return data
 
 
 def _ytdlp_search(query: str, limit: int = 5) -> list:

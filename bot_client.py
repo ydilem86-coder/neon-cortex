@@ -50,10 +50,22 @@ def _ytdlp_extract_info(url: str, download: bool = False) -> dict:
         cmd.extend(["--default-search", "ytsearch"])
     cmd.append(url)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except FileNotFoundError:
+        # yt-dlp not found as binary, try python module
+        cmd = ["python", "-m", "yt_dlp"] + cmd[1:]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
     if result.returncode != 0:
-        raise Exception(result.stderr.strip() or "yt-dlp failed")
-    data = _json.loads(result.stdout)
+        err = result.stderr.strip() or result.stdout.strip() or "yt-dlp failed"
+        raise Exception(err)
+
+    stdout = result.stdout.strip()
+    if not stdout:
+        raise Exception("yt-dlp returned empty output")
+
+    data = _json.loads(stdout)
 
     if "formats" in data and not data.get("url"):
         audio_fmts = [f for f in data["formats"] if f.get("acodec") != "none" and f.get("vcodec") == "none"]
@@ -88,9 +100,14 @@ def _ytdlp_search(query: str, limit: int = 5) -> list:
     if os.path.exists(COOKIES_FILE):
         cmd.extend(["--cookies", COOKIES_FILE])
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        cmd = ["python", "-m", "yt_dlp"] + cmd[1:]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
     if result.returncode != 0:
-        raise Exception(result.stderr.strip() or "yt-dlp search failed")
+        raise Exception(result.stderr.strip() or result.stdout.strip() or "yt-dlp search failed")
 
     results = []
     for line in result.stdout.strip().split("\n"):

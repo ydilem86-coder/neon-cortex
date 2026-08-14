@@ -295,6 +295,10 @@ const TITLES = {
   search: "بحث الموحد",
   audit: "سجل التغييرات",
   tools: "الأدوات",
+  protection: "حماية السيرفر",
+  stats: "الإحصائيات المباشرة",
+  welcomeCard: "بطاقة الترحيب",
+  embedBuilder: "منشئ Embed",
 };
 
 function render(tab) {

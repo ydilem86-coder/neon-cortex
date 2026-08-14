@@ -1722,19 +1722,19 @@ async function viewProtection() {
   try {
     const g = curGuild();
     const cfg = (await API.getProtection(g)).config;
-    $("protInsult").checked = cfg.insult_protection || false;
-    $("protInsultWarns").value = cfg.insult_warns || 3;
-    $("protSpam").checked = cfg.anti_spam || false;
+    $("protInsult").checked = cfg.bot_insult_kick || false;
+    $("protInsultWarns").value = cfg.bot_insult_warns_before_kick || 2;
+    $("protSpam").checked = cfg.spam_protection || false;
     $("protSpamTh").value = cfg.spam_threshold || 5;
-    $("protSpamWin").value = cfg.spam_window || 5;
-    $("protRaid").checked = cfg.anti_raid || false;
-    $("protRaidTh").value = cfg.raid_threshold || 8;
-    $("protRaidWin").value = cfg.raid_window || 30;
-    $("protMention").checked = cfg.mass_mention || false;
-    $("protLinks").checked = cfg.link_block || false;
-    $("protUnban").checked = cfg.auto_unban || false;
-    $("protUnbanHrs").value = cfg.unban_hours || 24;
-    $("protAutoRole").checked = cfg.auto_role || false;
+    $("protSpamWin").value = cfg.spam_window || 3;
+    $("protRaid").checked = cfg.raid_protection || false;
+    $("protRaidTh").value = cfg.raid_threshold || 10;
+    $("protRaidWin").value = cfg.raid_window || 60;
+    $("protMention").checked = cfg.anti_mass_mention || false;
+    $("protLinks").checked = cfg.link_block_enabled || false;
+    $("protUnban").checked = cfg.auto_unban_enabled || false;
+    $("protUnbanHrs").value = cfg.auto_unban_hours || 24;
+    $("protAutoRole").checked = cfg.auto_role_enabled || false;
 
     const roles = (await API.guildRoles(g)).roles.filter(r => !r.default);
     $("protRole").innerHTML = roles.map(r => `<option value="${r.id}">🎭 ${esc(r.name)}</option>`).join("");
@@ -1747,20 +1747,23 @@ async function viewProtection() {
 async function saveProtection() {
   const g = curGuild();
   const cfg = {
-    insult_protection: $("protInsult").checked,
-    insult_warns: parseInt($("protInsultWarns").value) || 3,
-    anti_spam: $("protSpam").checked,
+    bot_insult_kick: $("protInsult").checked,
+    bot_insult_warns_before_kick: parseInt($("protInsultWarns").value) || 2,
+    max_warnings_before_ban: 5,
+    anti_mass_mention: $("protMention").checked,
+    mass_mention_threshold: 5,
+    spam_protection: $("protSpam").checked,
     spam_threshold: parseInt($("protSpamTh").value) || 5,
-    spam_window: parseInt($("protSpamWin").value) || 5,
-    anti_raid: $("protRaid").checked,
-    raid_threshold: parseInt($("protRaidTh").value) || 8,
-    raid_window: parseInt($("protRaidWin").value) || 30,
-    mass_mention: $("protMention").checked,
-    link_block: $("protLinks").checked,
-    auto_unban: $("protUnban").checked,
-    unban_hours: parseInt($("protUnbanHrs").value) || 24,
-    auto_role: $("protAutoRole").checked,
-    auto_role_id: $("protRole").value || null,
+    spam_window: parseInt($("protSpamWin").value) || 3,
+    raid_protection: $("protRaid").checked,
+    raid_threshold: parseInt($("protRaidTh").value) || 10,
+    raid_window: parseInt($("protRaidWin").value) || 60,
+    greeting_protection: false,
+    link_block_enabled: $("protLinks").checked,
+    auto_unban_enabled: $("protUnban").checked,
+    auto_unban_hours: parseInt($("protUnbanHrs").value) || 24,
+    auto_role_enabled: $("protAutoRole").checked,
+    auto_role_id: parseInt($("protRole").value) || 0,
   };
   try {
     await App.task(API.setProtection(g, cfg));
@@ -1927,17 +1930,17 @@ async function welcomeCardView() {
   try {
     const opts = await channelOptions("text");
     $("wcChannel").innerHTML = opts;
-    const cfg = (await API.getWelcomeConfig(curGuild())).config || {};
-    if (cfg.enabled !== undefined) $("wcEnabled").checked = cfg.enabled;
-    if (cfg.channel_id && $("wcChannel").querySelector(`option[value="${cfg.channel_id}"]`)) $("wcChannel").value = cfg.channel_id;
-    if (cfg.title) $("wcTitle").value = cfg.title;
-    if (cfg.subtitle) $("wcSubtitle").value = cfg.subtitle;
-    if (cfg.bg_color) $("wcBgColor").value = cfg.bg_color;
-    if (cfg.text_color) $("wcTextColor").value = cfg.text_color;
-    if (cfg.accent_color) $("wcAccentColor").value = cfg.accent_color;
-    if (cfg.border_style) $("wcBorderStyle").value = cfg.border_style;
-    if (cfg.show_avatar !== undefined) $("wcShowAvatar").checked = cfg.show_avatar;
-    if (cfg.show_count !== undefined) $("wcShowCount").checked = cfg.show_count;
+    const resp = await API.getWelcomeConfig(curGuild());
+    if (resp.enabled !== undefined) $("wcEnabled").checked = resp.enabled;
+    if (resp.channel_id && $("wcChannel").querySelector(`option[value="${resp.channel_id}"]`)) $("wcChannel").value = resp.channel_id;
+    if (resp.title) $("wcTitle").value = resp.title;
+    if (resp.subtitle) $("wcSubtitle").value = resp.subtitle;
+    if (resp.bg_color) $("wcBgColor").value = resp.bg_color;
+    if (resp.text_color) $("wcTextColor").value = resp.text_color;
+    if (resp.accent_color) $("wcAccentColor").value = resp.accent_color;
+    if (resp.border_style) $("wcBorderStyle").value = resp.border_style;
+    if (resp.show_avatar !== undefined) $("wcShowAvatar").checked = resp.show_avatar;
+    if (resp.show_member_count !== undefined) $("wcShowCount").checked = resp.show_member_count;
   } catch (e) { UI.toast("error", e.message); }
   updateWelcomePreview();
 }
@@ -1972,7 +1975,7 @@ async function saveWelcomeCard() {
   const g = curGuild();
   const cfg = {
     enabled: $("wcEnabled").checked,
-    channel_id: $("wcChannel").value,
+    channel_id: parseInt($("wcChannel").value) || 0,
     title: $("wcTitle").value,
     subtitle: $("wcSubtitle").value,
     bg_color: $("wcBgColor").value,
@@ -1980,7 +1983,7 @@ async function saveWelcomeCard() {
     accent_color: $("wcAccentColor").value,
     border_style: $("wcBorderStyle").value,
     show_avatar: $("wcShowAvatar").checked,
-    show_count: $("wcShowCount").checked,
+    show_member_count: $("wcShowCount").checked,
   };
   try {
     await App.task(API.setWelcomeConfig(g, cfg));
@@ -2114,11 +2117,25 @@ function buildEmbedProJSON() {
 }
 
 async function sendEmbedPro() {
+  const g = curGuild();
   const ch = $("ebProChannel") ? $("ebProChannel").value : "";
   if (!ch) return UI.toast("warn", "اختر قناة للإرسال");
   try {
     const embed = buildEmbedProJSON();
-    await App.task(API.sendEmbed(ch, embed));
+    const payload = {
+      channel_id: parseInt(ch),
+      title: embed.title || "",
+      description: embed.description || "",
+      color: $("ebProColor") ? $("ebProColor").value : "#5865F2",
+      author_name: $("ebProAuthor") ? $("ebProAuthor").value : "",
+      author_icon: $("ebProAuthorIcon") ? $("ebProAuthorIcon").value : "",
+      footer_text: $("ebProFooter") ? $("ebProFooter").value : "",
+      footer_icon: $("ebProFooterIcon") ? $("ebProFooterIcon").value : "",
+      thumbnail: $("ebProThumb") ? $("ebProThumb").value : "",
+      image: $("ebProImage") ? $("ebProImage").value : "",
+      fields: _ebFields.filter(f => f.name || f.value),
+    };
+    await App.task(API.sendEmbed(g, payload));
     UI.toast("success", "✅ تم إرسال الـ Embed بنجاح");
   } catch (e) { UI.toast("error", e.message); }
 }

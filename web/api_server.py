@@ -499,6 +499,11 @@ class ProtectionIn(BaseModel):
     raid_threshold: int = 10
     raid_window: int = 60
     greeting_protection: bool = False
+    link_block_enabled: bool = False
+    auto_unban_enabled: bool = False
+    auto_unban_hours: int = 24
+    auto_role_enabled: bool = False
+    auto_role_id: int = 0
 
 
 class AutoRoleIn(BaseModel):
@@ -1714,6 +1719,11 @@ def set_protection(guild_id: int, body: ProtectionIn):
         raid_threshold=body.raid_threshold,
         raid_window=body.raid_window,
         greeting_protection=body.greeting_protection,
+        link_block_enabled=body.link_block_enabled,
+        auto_unban_enabled=body.auto_unban_enabled,
+        auto_unban_hours=body.auto_unban_hours,
+        auto_role_enabled=body.auto_role_enabled,
+        auto_role_id=body.auto_role_id,
     )
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -1841,6 +1851,7 @@ def live_stats(guild_id: int):
 
 @app.get("/api/health")
 def health():
+    import psutil as _psutil
     uptime_seconds = 0
     if bot_manager.ready and bot_manager.client and hasattr(bot_manager.client, 'uptime') and bot_manager.client.uptime:
         try:
@@ -1848,12 +1859,29 @@ def health():
         except Exception:
             pass
     total_members = sum(g.member_count or 0 for g in bot_manager.guilds)
+    try:
+        import psutil
+        _cpu = psutil.cpu_percent(interval=0)
+        _ram = psutil.virtual_memory()
+        cpu_percent = _cpu
+        ram_percent = _ram.percent
+        ram_used_mb = _ram.used / (1024 * 1024)
+        ram_total_mb = _ram.total / (1024 * 1024)
+    except Exception:
+        cpu_percent = 0
+        ram_percent = 0
+        ram_used_mb = 0
+        ram_total_mb = 0
     return {
         "ok": True,
         "uptime": int(uptime_seconds),
         "guilds_count": len(bot_manager.guilds),
         "total_members": total_members,
         "version": "2.0.0",
+        "cpu_percent": cpu_percent,
+        "ram_percent": ram_percent,
+        "ram_used_mb": ram_used_mb,
+        "ram_total_mb": ram_total_mb,
     }
 
 

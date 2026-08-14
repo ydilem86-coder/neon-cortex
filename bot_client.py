@@ -41,7 +41,6 @@ def _ytdlp_extract_info(url: str, download: bool = False) -> dict:
     cmd = [
         "yt-dlp",
         "--js-runtimes", "node",
-        "--remote-components", "ejs:github",
         "--dump-json",
         "--no-warnings",
     ]
@@ -80,7 +79,6 @@ def _ytdlp_search(query: str, limit: int = 5) -> list:
     cmd = [
         "yt-dlp",
         "--js-runtimes", "node",
-        "--remote-components", "ejs:github",
         "--dump-json",
         "--no-warnings",
         "--flat-playlist",

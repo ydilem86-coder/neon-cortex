@@ -5,6 +5,9 @@ RUN apt-get update && apt-get install -y ffmpeg curl && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
+    chmod +x /usr/local/bin/yt-dlp
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -17,7 +20,6 @@ COPY web/ web/
 
 RUN mkdir -p /root/.config/yt-dlp
 RUN echo "--js-runtimes node" > /root/.config/yt-dlp/config
-RUN echo "--remote-components ejs:github" >> /root/.config/yt-dlp/config
 RUN echo "--cookies /app/config/cookies.txt" >> /root/.config/yt-dlp/config
 
 WORKDIR /app/web

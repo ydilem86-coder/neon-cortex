@@ -1966,7 +1966,7 @@ bot_manager = BotManager()
 def _yt_search(query: str, limit: int = 5) -> list:
     """Fast YouTube search returning title, url, thumbnail, duration."""
     import yt_dlp
-    opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "default_search": "ytsearch"}
+    opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "default_search": "ytsearch", "js_runtimes": {"node": {}}}
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
     with yt_dlp.YoutubeDL(opts) as ydl:

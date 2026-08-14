@@ -16,7 +16,6 @@ config/admin_password.hash
 config/sessions.json
 config/users.json
 config/warns.json
-config/cookies.txt
 web/error.log
 web/audit.log
 web/start_web.bat

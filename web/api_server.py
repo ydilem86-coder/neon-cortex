@@ -1851,7 +1851,6 @@ def live_stats(guild_id: int):
 
 @app.get("/api/health")
 def health():
-    import psutil as _psutil
     uptime_seconds = 0
     if bot_manager.ready and bot_manager.client and hasattr(bot_manager.client, 'uptime') and bot_manager.client.uptime:
         try:
@@ -1859,19 +1858,19 @@ def health():
         except Exception:
             pass
     total_members = sum(g.member_count or 0 for g in bot_manager.guilds)
+    cpu_percent = 0
+    ram_percent = 0
+    ram_used_mb = 0
+    ram_total_mb = 0
     try:
         import psutil
-        _cpu = psutil.cpu_percent(interval=0)
+        cpu_percent = psutil.cpu_percent(interval=0)
         _ram = psutil.virtual_memory()
-        cpu_percent = _cpu
         ram_percent = _ram.percent
         ram_used_mb = _ram.used / (1024 * 1024)
         ram_total_mb = _ram.total / (1024 * 1024)
     except Exception:
-        cpu_percent = 0
-        ram_percent = 0
-        ram_used_mb = 0
-        ram_total_mb = 0
+        pass
     return {
         "ok": True,
         "uptime": int(uptime_seconds),

@@ -1640,7 +1640,6 @@ function clearAuditLog() {
 
 /* ── Server Protection ─────────────────────────────────────── */
 async function viewProtection() {
-  if (!requireGuild()) return;
   const view = $("view");
   view.innerHTML = `
     <div class="grid grid-2">
@@ -1650,8 +1649,7 @@ async function viewProtection() {
           <div><b>تفعيل الحماية</b><div style="font-size:12px;color:var(--text-faint)">حذف رسائل الإهان تلقائياً</div></div>
           <label class="toggle"><input type="checkbox" id="protInsult" /><span class="slider"></span></label>
         </div>
-        <div class="field"><label>عدد التحذيرات قبل الحظر</label><input id="protInsultWarns" type="number" class="input" value="3" min="1" max="10" /></div>
-        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
+        <div class="field"><label>عدد التحذيرات قبل الحظر</label><input id="protInsultWarns" type="number" class="input" value="2" min="1" max="10" /></div>
       </div>
 
       <div class="card glass">
@@ -1662,22 +1660,20 @@ async function viewProtection() {
         </div>
         <div class="field-row">
           <div class="field"><label>عدد الرسائل</label><input id="protSpamTh" type="number" class="input" value="5" min="2" max="20" /></div>
-          <div class="field"><label>خلال (ثوانٍ)</label><input id="protSpamWin" type="number" class="input" value="5" min="1" max="30" /></div>
+          <div class="field"><label>خلال (ثوانٍ)</label><input id="protSpamWin" type="number" class="input" value="3" min="1" max="30" /></div>
         </div>
-        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
       </div>
 
       <div class="card glass">
-        <h3>⚡ حماية من الأ райد <span class="sub">Anti-Raid</span></h3>
+        <h3>⚡ حماية من الرايد <span class="sub">Anti-Raid</span></h3>
         <div class="field" style="display:flex;align-items:center;justify-content:space-between">
           <div><b>تفعيل حماية الرايد</b><div style="font-size:12px;color:var(--text-faint)">منع موجة الدخول الجماعي</div></div>
           <label class="toggle"><input type="checkbox" id="protRaid" /><span class="slider"></span></label>
         </div>
         <div class="field-row">
-          <div class="field"><label>عدد الدخول المطلوب</label><input id="protRaidTh" type="number" class="input" value="8" min="3" max="50" /></div>
-          <div class="field"><label>خلال (ثوانٍ)</label><input id="protRaidWin" type="number" class="input" value="30" min="5" max="120" /></div>
+          <div class="field"><label>عدد الدخول المطلوب</label><input id="protRaidTh" type="number" class="input" value="10" min="3" max="50" /></div>
+          <div class="field"><label>خلال (ثوانٍ)</label><input id="protRaidWin" type="number" class="input" value="60" min="5" max="120" /></div>
         </div>
-        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
       </div>
 
       <div class="card glass">
@@ -1686,7 +1682,6 @@ async function viewProtection() {
           <div><b>منع المنشن الجماعي</b><div style="font-size:12px;color:var(--text-faint)">حذف رسائل المنشن المفرط</div></div>
           <label class="toggle"><input type="checkbox" id="protMention" /><span class="slider"></span></label>
         </div>
-        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
       </div>
 
       <div class="card glass">
@@ -1695,7 +1690,6 @@ async function viewProtection() {
           <div><b>حظر الروابط الخارجية</b><div style="font-size:12px;color:var(--text-faint)">منع إرسال أي روابط</div></div>
           <label class="toggle"><input type="checkbox" id="protLinks" /><span class="slider"></span></label>
         </div>
-        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
       </div>
 
       <div class="card glass">
@@ -1705,7 +1699,6 @@ async function viewProtection() {
           <label class="toggle"><input type="checkbox" id="protUnban" /><span class="slider"></span></label>
         </div>
         <div class="field"><label>بعد كم ساعة</label><input id="protUnbanHrs" type="number" class="input" value="24" min="1" max="720" /></div>
-        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
       </div>
 
       <div class="card glass" style="grid-column:1/-1">
@@ -1714,14 +1707,19 @@ async function viewProtection() {
           <div><b>تفعيل التعيين التلقائي</b><div style="font-size:12px;color:var(--text-faint)">تعيين رول للأعضاء الجدد تلقائياً</div></div>
           <label class="toggle"><input type="checkbox" id="protAutoRole" /><span class="slider"></span></label>
         </div>
-        <div class="field"><label>الرول</label><select id="protRole" class="input"></select></div>
-        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ جميع الإعدادات</button>
+        <div class="field"><label>الرول</label><select id="protRole" class="input"><option value="">— اختر رول —</option></select></div>
+        <button class="btn btn-primary w-full" onclick="saveProtection()" style="margin-top:12px">💾 حفظ جميع الإعدادات</button>
       </div>
     </div>`;
 
+  const g = curGuild();
+  if (!g) {
+    $("protRole").innerHTML = '<option value="">⚠️ اختر سيرفراً أولاً</option>';
+    return;
+  }
   try {
-    const g = curGuild();
-    const cfg = (await API.getProtection(g)).config;
+    const resp = await API.getProtection(g);
+    const cfg = resp.config || resp;
     $("protInsult").checked = cfg.bot_insult_kick || false;
     $("protInsultWarns").value = cfg.bot_insult_warns_before_kick || 2;
     $("protSpam").checked = cfg.spam_protection || false;
@@ -1736,16 +1734,18 @@ async function viewProtection() {
     $("protUnbanHrs").value = cfg.auto_unban_hours || 24;
     $("protAutoRole").checked = cfg.auto_role_enabled || false;
 
-    const roles = (await API.guildRoles(g)).roles.filter(r => !r.default);
-    $("protRole").innerHTML = roles.map(r => `<option value="${r.id}">🎭 ${esc(r.name)}</option>`).join("");
-    if (cfg.auto_role_id && $("protRole").querySelector(`option[value="${cfg.auto_role_id}"]`)) {
-      $("protRole").value = cfg.auto_role_id;
-    }
+    const rolesResp = await API.guildRoles(g);
+    const roles = (rolesResp.roles || []).filter(r => !r.default);
+    $("protRole").innerHTML = '<option value="">— بدون رول —</option>' + roles.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join("");
+    if (cfg.auto_role_id) $("protRole").value = String(cfg.auto_role_id);
+  } catch (e) { UI.toast("error", "خطأ تحميل الإعدادات: " + e.message); }
+}
   } catch (e) { UI.toast("error", e.message); }
 }
 
 async function saveProtection() {
   const g = curGuild();
+  if (!g) return UI.toast("warn", "⚠️ اختر سيرفراً أولاً");
   const cfg = {
     bot_insult_kick: $("protInsult").checked,
     bot_insult_warns_before_kick: parseInt($("protInsultWarns").value) || 2,
@@ -1775,9 +1775,13 @@ async function saveProtection() {
 let _statsInterval = null;
 
 async function viewStats() {
-  if (!requireGuild()) return;
   if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
   const view = $("view");
+  const g = curGuild();
+  if (!g) {
+    view.innerHTML = `<div class="card glass neon-frame"><div class="empty"><div class="e-icon">📊</div><div>اختر سيرفراً أولاً لعرض الإحصائيات المباشرة</div></div></div>`;
+    return;
+  }
   view.innerHTML = `
     <div class="card glass neon-frame" id="statsHero">
       <div class="loading"><div class="loader"></div><span>جاري تحميل الإحصائيات...</span></div>
@@ -1885,8 +1889,12 @@ async function loadVoiceActivity() {
 
 /* ── Welcome Card Designer ──────────────────────────────────── */
 async function welcomeCardView() {
-  if (!requireGuild()) return;
   const view = $("view");
+  const g = curGuild();
+  if (!g) {
+    view.innerHTML = `<div class="card glass neon-frame"><div class="empty"><div class="e-icon">🎴</div><div>اختر سيرفراً أولاً لتصميم بطاقة الترحيب</div></div></div>`;
+    return;
+  }
   view.innerHTML = `
     <div class="card glass">
       <h3>🃏 مصمم بطاقة الترحيب <span class="sub">بطاقة ترحيب فخمة مع معاينة مباشرة</span></h3>
@@ -1995,9 +2003,13 @@ async function saveWelcomeCard() {
 let _ebFields = [];
 
 function embedBuilderView() {
-  if (!requireGuild()) return;
   _ebFields = [];
   const view = $("view");
+  const g = curGuild();
+  if (!g) {
+    view.innerHTML = `<div class="card glass neon-frame"><div class="empty"><div class="e-icon">💎</div><div>اختر سيرفراً أولاً لاستخدام منشئ الـ Embed</div></div></div>`;
+    return;
+  }
   view.innerHTML = `
     <div class="card glass">
       <h3>✨ منشئ الـ Embed الفخم <span class="sub">صمم وعاين وأرسل</span></h3>

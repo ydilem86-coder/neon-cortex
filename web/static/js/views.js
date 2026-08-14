@@ -1740,8 +1740,6 @@ async function viewProtection() {
     if (cfg.auto_role_id) $("protRole").value = String(cfg.auto_role_id);
   } catch (e) { UI.toast("error", "خطأ تحميل الإعدادات: " + e.message); }
 }
-  } catch (e) { UI.toast("error", e.message); }
-}
 
 async function saveProtection() {
   const g = curGuild();

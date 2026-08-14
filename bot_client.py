@@ -136,24 +136,39 @@ async def _resolve_spotify_url(url: str) -> tuple[str, str]:
     # Try oembed API
     try:
         async with aiohttp.ClientSession() as session:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            async with session.get(f"https://open.spotify.com/oembed?url={url}", headers=headers) as resp:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            async with session.get(f"https://open.spotify.com/oembed?url={url}", headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status == 200:
                     text = await resp.text()
-                    if text.strip():
+                    if text.strip().startswith("{"):
                         data = __import__("json").loads(text)
                         title = data.get("title", "")
                         thumbnail = data.get("thumbnail_url", "")
                         if title:
-                            return f"{title} audio", thumbnail
+                            return f"{title} official audio", thumbnail
     except Exception:
         pass
 
-    # Fallback: parse track name from URL
-    # https://open.spotify.com/track/4cOdK2wGEL8ETb7sHIx9l3 → track ID
-    match = re.search(r"spotify\.com/track/([a-zA-Z0-9]+)", url)
+    # Fallback: extract from URL path
+    match = re.search(r"spotify\.com/(track|playlist|album)/([a-zA-Z0-9]+)", url)
     if match:
-        return f"spotify track {match.group(1)} audio", ""
+        track_type = match.group(1)
+        track_id = match.group(2)
+        # Try to get info from Spotify's public embed page
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://open.spotify.com/embed/{track_type}/{track_id}", timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        html = await resp.text()
+                        title_match = re.search(r'"name"\s*:\s*"([^"]+)"', html)
+                        artist_match = re.search(r'"artists?\s*:\s*\[\s*\{[^}]*"name"\s*:\s*"([^"]+)"', html)
+                        if title_match:
+                            title = title_match.group(1)
+                            artist = artist_match.group(1) if artist_match else ""
+                            query = f"{artist} {title}".strip()
+                            return f"{query} official audio", ""
+        except Exception:
+            pass
 
     return url, ""
 

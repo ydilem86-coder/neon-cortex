@@ -27,7 +27,7 @@ def _get_ytdlp_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
-        "extractor_args": {"youtube": {"player_client": ["web", "mweb"]}},
+        "js_runtimes": {"node": {}},
     }
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
@@ -1537,11 +1537,12 @@ class BotManager:
         try:
             import yt_dlp
             opts = {
-                "format": "best",
+                "format": "bestaudio/best",
                 "quiet": True,
                 "no_warnings": True,
                 "extract_flat": True,
                 "default_search": "ytsearch",
+                "js_runtimes": {"node": {}},
             }
             if os.path.exists(COOKIES_FILE):
                 opts["cookiefile"] = COOKIES_FILE

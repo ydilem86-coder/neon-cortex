@@ -114,17 +114,30 @@ def _ytdlp_search(query: str, limit: int = 5) -> list:
 async def _resolve_spotify_url(url: str) -> tuple[str, str]:
     """Resolve a Spotify URL to track name + artist. Returns (query, thumbnail)."""
     import aiohttp
+    import re
+
+    # Try oembed API
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://open.spotify.com/oembed?url={url}") as resp:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            async with session.get(f"https://open.spotify.com/oembed?url={url}", headers=headers) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    title = data.get("title", "")
-                    thumbnail = data.get("thumbnail_url", "")
-                    return f"{title} audio", thumbnail
+                    text = await resp.text()
+                    if text.strip():
+                        data = __import__("json").loads(text)
+                        title = data.get("title", "")
+                        thumbnail = data.get("thumbnail_url", "")
+                        if title:
+                            return f"{title} audio", thumbnail
     except Exception:
         pass
-    # Fallback: extract from URL
+
+    # Fallback: parse track name from URL
+    # https://open.spotify.com/track/4cOdK2wGEL8ETb7sHIx9l3 → track ID
+    match = re.search(r"spotify\.com/track/([a-zA-Z0-9]+)", url)
+    if match:
+        return f"spotify track {match.group(1)} audio", ""
+
     return url, ""
 
 

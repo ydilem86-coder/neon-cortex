@@ -5,22 +5,18 @@ RUN apt-get update && apt-get install -y ffmpeg curl && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
-    chmod +x /usr/local/bin/yt-dlp
-
 WORKDIR /app
 
 COPY requirements.txt .
 COPY web/requirements.txt web_requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt -r web_requirements.txt
 
+RUN mkdir -p /root/.config/yt-dlp
+COPY config/yt-dlp.conf /root/.config/yt-dlp/config
+
 COPY bot_client.py .
 COPY config/ config/
 COPY web/ web/
-
-RUN mkdir -p /root/.config/yt-dlp
-RUN echo "--js-runtimes node" > /root/.config/yt-dlp/config
-RUN echo "--cookies /app/config/cookies.txt" >> /root/.config/yt-dlp/config
 
 WORKDIR /app/web
 

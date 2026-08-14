@@ -15,6 +15,10 @@ COPY bot_client.py .
 COPY config/ config/
 COPY web/ web/
 
+RUN mkdir -p /root/.config/yt-dlp
+RUN echo "--js-runtimes node" > /root/.config/yt-dlp/config
+RUN echo "--remote-components ejs:github" >> /root/.config/yt-dlp/config
+
 WORKDIR /app/web
 
 EXPOSE 8000

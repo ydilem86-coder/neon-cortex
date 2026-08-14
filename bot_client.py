@@ -22,7 +22,7 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 def _get_ytdlp_opts() -> dict:
     """Get yt-dlp options with cookies if available."""
-    opts = {"format": "bestaudio/best", "quiet": True, "no_warnings": True, "extract_flat": False}
+    opts = {"format": "bestaudio/best[ext=m4a]/bestaudio/best", "quiet": True, "no_warnings": True, "extract_flat": False}
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
     return opts
@@ -1531,7 +1531,7 @@ class BotManager:
         try:
             import yt_dlp
             opts = {
-                "format": "bestaudio/best",
+                "format": "bestaudio/best[ext=m4a]/bestaudio/best",
                 "quiet": True,
                 "no_warnings": True,
                 "extract_flat": True,

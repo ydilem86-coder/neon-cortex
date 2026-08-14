@@ -486,6 +486,37 @@ class LogChannelIn(BaseModel):
     channel_id: int
 
 
+class ProtectionIn(BaseModel):
+    bot_insult_kick: bool = False
+    bot_insult_warns_before_kick: int = 2
+    max_warnings_before_ban: int = 5
+    anti_mass_mention: bool = False
+    mass_mention_threshold: int = 5
+    spam_protection: bool = False
+    spam_threshold: int = 5
+    spam_window: int = 3
+    raid_protection: bool = False
+    raid_threshold: int = 10
+    raid_window: int = 60
+    greeting_protection: bool = False
+
+
+class AutoRoleIn(BaseModel):
+    enabled: bool = False
+    role_id: int = 0
+
+
+class LinkBlockIn(BaseModel):
+    enabled: bool = False
+    channels: list[int] = []
+    whitelist: list[int] = []
+
+
+class AutoUnbanIn(BaseModel):
+    enabled: bool = False
+    hours: int = 24
+
+
 # ── Connection / Status ────────────────────────────────────────────────
 
 @app.get("/api/status")
@@ -1651,6 +1682,277 @@ def update_permissions(username: str, body: dict):
     _save_users(users)
     _log_audit("permissions_updated", "admin", f"تحديث صلاحيات: {username}")
     return {"ok": True, "message": "تم تحديث الصلاحيات"}
+
+
+# ── Protection ────────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/protection")
+def get_protection(guild_id: int):
+    require_connected()
+    if not _get_guild(guild_id):
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    config = bot_manager.get_protection_config(guild_id)
+    return {"ok": True, "config": config}
+
+
+@app.post("/api/guilds/{guild_id}/protection")
+def set_protection(guild_id: int, body: ProtectionIn):
+    require_connected()
+    if not _get_guild(guild_id):
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    ok, msg = bot_manager.set_protection_config(
+        guild_id,
+        bot_insult_kick=body.bot_insult_kick,
+        bot_insult_warns_before_kick=body.bot_insult_warns_before_kick,
+        max_warnings_before_ban=body.max_warnings_before_ban,
+        anti_mass_mention=body.anti_mass_mention,
+        mass_mention_threshold=body.mass_mention_threshold,
+        spam_protection=body.spam_protection,
+        spam_threshold=body.spam_threshold,
+        spam_window=body.spam_window,
+        raid_protection=body.raid_protection,
+        raid_threshold=body.raid_threshold,
+        raid_window=body.raid_window,
+        greeting_protection=body.greeting_protection,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "message": msg}
+
+
+# ── Auto-Role ────────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/auto-role")
+def get_auto_role(guild_id: int):
+    require_connected()
+    if not _get_guild(guild_id):
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    cfg = bot_manager.get_protection_config(guild_id)
+    return {"ok": True, "enabled": cfg.get("auto_role_enabled", False), "role_id": cfg.get("auto_role_id", 0)}
+
+
+@app.post("/api/guilds/{guild_id}/auto-role")
+def set_auto_role(guild_id: int, body: AutoRoleIn):
+    require_connected()
+    if not _get_guild(guild_id):
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    ok, msg = bot_manager.set_protection_config(
+        guild_id,
+        auto_role_enabled=body.enabled,
+        auto_role_id=body.role_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "message": msg}
+
+
+# ── Link Block ───────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/link-block")
+def get_link_block(guild_id: int):
+    require_connected()
+    if not _get_guild(guild_id):
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    cfg = bot_manager.get_protection_config(guild_id)
+    return {"ok": True, "enabled": cfg.get("link_block_enabled", False),
+            "channels": cfg.get("link_block_channels", []),
+            "whitelist": cfg.get("link_block_whitelist", [])}
+
+
+@app.post("/api/guilds/{guild_id}/link-block")
+def set_link_block(guild_id: int, body: LinkBlockIn):
+    require_connected()
+    if not _get_guild(guild_id):
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    ok, msg = bot_manager.set_protection_config(
+        guild_id,
+        link_block_enabled=body.enabled,
+        link_block_channels=body.channels,
+        link_block_whitelist=body.whitelist,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "message": msg}
+
+
+# ── Auto-Unban ───────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/auto-unban")
+def get_auto_unban(guild_id: int):
+    require_connected()
+    if not _get_guild(guild_id):
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    cfg = bot_manager.get_protection_config(guild_id)
+    return {"ok": True, "enabled": cfg.get("auto_unban_enabled", False), "hours": cfg.get("auto_unban_hours", 24)}
+
+
+@app.post("/api/guilds/{guild_id}/auto-unban")
+def set_auto_unban(guild_id: int, body: AutoUnbanIn):
+    require_connected()
+    if not _get_guild(guild_id):
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    ok, msg = bot_manager.set_protection_config(
+        guild_id,
+        auto_unban_enabled=body.enabled,
+        auto_unban_hours=body.hours,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "message": msg}
+
+
+# ── Live Stats ───────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/live-stats")
+def live_stats(guild_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    members = list(guild.members)
+    humans = [m for m in members if not m.bot]
+    online = [m for m in humans if m.status != discord.Status.offline]
+    voice_active = sum(1 for m in members if m.voice and m.voice.channel)
+    uptime_val = bot_manager.client.uptime if bot_manager.ready and bot_manager.client else datetime.now()
+    try:
+        uptime_seconds = (datetime.now().utcnow() - uptime_val).total_seconds() if hasattr(uptime_val, 'year') else 0
+    except Exception:
+        uptime_seconds = 0
+    try:
+        import psutil
+        cpu = psutil.cpu_percent(interval=0.1)
+        ram = psutil.virtual_memory().percent
+    except ImportError:
+        cpu = 0
+        ram = 0
+    return {
+        "ok": True,
+        "members": len(members),
+        "online": len(online),
+        "messages_today": 0,
+        "voice_active": voice_active,
+        "uptime": int(uptime_seconds),
+        "cpu": cpu,
+        "ram": ram,
+    }
+
+
+# ── Health ───────────────────────────────────────────────────────────
+
+@app.get("/api/health")
+def health():
+    uptime_seconds = 0
+    if bot_manager.ready and bot_manager.client and hasattr(bot_manager.client, 'uptime') and bot_manager.client.uptime:
+        try:
+            uptime_seconds = (datetime.utcnow() - bot_manager.client.uptime).total_seconds()
+        except Exception:
+            pass
+    total_members = sum(g.member_count or 0 for g in bot_manager.guilds)
+    return {
+        "ok": True,
+        "uptime": int(uptime_seconds),
+        "guilds_count": len(bot_manager.guilds),
+        "total_members": total_members,
+        "version": "2.0.0",
+    }
+
+
+# ── Welcome Card Config ────────────────────────────────────────────
+
+
+class WelcomeCardIn(BaseModel):
+    enabled: Optional[bool] = None
+    channel_id: Optional[int] = None
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    bg_color: Optional[str] = None
+    text_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    show_avatar: Optional[bool] = None
+    show_member_count: Optional[bool] = None
+    border_style: Optional[str] = None
+    custom_image: Optional[str] = None
+
+
+@app.get("/api/guilds/{guild_id}/welcome-config")
+async def get_welcome_config(guild_id: int):
+    if not require_connected():
+        return {"ok": False, "error": "not connected"}
+    guild = _get_guild(guild_id)
+    if not guild:
+        return {"ok": False, "error": "guild not found"}
+    cfg = bot_manager.run_coro(bot_manager.get_welcome_config(guild_id))
+    return {"ok": True, **cfg}
+
+
+@app.post("/api/guilds/{guild_id}/welcome-config")
+async def set_welcome_config(guild_id: int, body: WelcomeCardIn):
+    if not require_connected():
+        return {"ok": False, "error": "not connected"}
+    guild = _get_guild(guild_id)
+    if not guild:
+        return {"ok": False, "error": "guild not found"}
+    kwargs = {k: v for k, v in body.dict().items() if v is not None}
+    bot_manager.run_coro(bot_manager.set_welcome_config(guild_id, **kwargs))
+    return {"ok": True, "message": "تم حفظ إعدادات بطاقة الترحيب"}
+
+
+# ── Embed Builder Send ─────────────────────────────────────────────
+
+
+class EmbedSendIn(BaseModel):
+    channel_id: int
+    title: str = ""
+    description: str = ""
+    color: str = "#5865F2"
+    author_name: str = ""
+    author_icon: str = ""
+    footer_text: str = ""
+    footer_icon: str = ""
+    thumbnail: str = ""
+    image: str = ""
+    fields: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/guilds/{guild_id}/embed/send")
+async def send_embed(guild_id: int, body: EmbedSendIn):
+    if not require_connected():
+        return {"ok": False, "error": "not connected"}
+    guild = _get_guild(guild_id)
+    if not guild:
+        return {"ok": False, "error": "guild not found"}
+    channel = guild.get_channel(body.channel_id)
+    if not channel:
+        return {"ok": False, "error": "channel not found"}
+
+    import discord
+
+    color_hex = body.color.lstrip("#")
+    color_int = int(color_hex, 16) if color_hex else 0x5865F2
+
+    embed = discord.Embed(
+        title=body.title, description=body.description, color=color_int
+    )
+    if body.author_name:
+        embed.set_author(name=body.author_name, icon_url=body.author_icon or None)
+    if body.footer_text:
+        embed.set_footer(text=body.footer_text, icon_url=body.footer_icon or None)
+    if body.thumbnail:
+        embed.set_thumbnail(url=body.thumbnail)
+    if body.image:
+        embed.set_image(url=body.image)
+    if body.fields:
+        for f in body.fields:
+            embed.add_field(name=f.get("name", ""), value=f.get("value", ""), inline=f.get("inline", False))
+
+    async def _send():
+        await channel.send(embed=embed)
+        return True
+
+    ok = bot_manager.run_coro(_send())
+    if ok:
+        return {"ok": True, "message": "تم إرسال الـ Embed بنجاح"}
+    return {"ok": False, "error": "failed to send embed"}
 
 
 @app.get("/")

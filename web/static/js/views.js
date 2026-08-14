@@ -1638,6 +1638,505 @@ function clearAuditLog() {
   });
 }
 
+/* ── Server Protection ─────────────────────────────────────── */
+async function viewProtection() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card glass">
+        <h3>🤖 حماية من الإهانات <span class="sub">Bot Insult Protection</span></h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>تفعيل الحماية</b><div style="font-size:12px;color:var(--text-faint)">حذف رسائل الإهان تلقائياً</div></div>
+          <label class="toggle"><input type="checkbox" id="protInsult" /><span class="slider"></span></label>
+        </div>
+        <div class="field"><label>عدد التحذيرات قبل الحظر</label><input id="protInsultWarns" type="number" class="input" value="3" min="1" max="10" /></div>
+        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
+      </div>
+
+      <div class="card glass">
+        <h3>🚫 حماية من السبام <span class="sub">Anti-Spam</span></h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>تفعيل حماية السبام</b><div style="font-size:12px;color:var(--text-faint)">منع تكرار الرسائل</div></div>
+          <label class="toggle"><input type="checkbox" id="protSpam" /><span class="slider"></span></label>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>عدد الرسائل</label><input id="protSpamTh" type="number" class="input" value="5" min="2" max="20" /></div>
+          <div class="field"><label>خلال (ثوانٍ)</label><input id="protSpamWin" type="number" class="input" value="5" min="1" max="30" /></div>
+        </div>
+        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
+      </div>
+
+      <div class="card glass">
+        <h3>⚡ حماية من الأ райد <span class="sub">Anti-Raid</span></h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>تفعيل حماية الرايد</b><div style="font-size:12px;color:var(--text-faint)">منع موجة الدخول الجماعي</div></div>
+          <label class="toggle"><input type="checkbox" id="protRaid" /><span class="slider"></span></label>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>عدد الدخول المطلوب</label><input id="protRaidTh" type="number" class="input" value="8" min="3" max="50" /></div>
+          <div class="field"><label>خلال (ثوانٍ)</label><input id="protRaidWin" type="number" class="input" value="30" min="5" max="120" /></div>
+        </div>
+        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
+      </div>
+
+      <div class="card glass">
+        <h3>👥 حماية من المنشن الجماعي <span class="sub">Mass Mention</span></h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>منع المنشن الجماعي</b><div style="font-size:12px;color:var(--text-faint)">حذف رسائل المنشن المفرط</div></div>
+          <label class="toggle"><input type="checkbox" id="protMention" /><span class="slider"></span></label>
+        </div>
+        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
+      </div>
+
+      <div class="card glass">
+        <h3>🔗 حظر الروابط <span class="sub">Link Block</span></h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>حظر الروابط الخارجية</b><div style="font-size:12px;color:var(--text-faint)">منع إرسال أي روابط</div></div>
+          <label class="toggle"><input type="checkbox" id="protLinks" /><span class="slider"></span></label>
+        </div>
+        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
+      </div>
+
+      <div class="card glass">
+        <h3>🔓 فتح الحظر التلقائي <span class="sub">Auto-Unban</span></h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>فتح الحظر تلقائياً</b><div style="font-size:12px;color:var(--text-faint)">إلغاء حظر الأعضاء بعد فترة</div></div>
+          <label class="toggle"><input type="checkbox" id="protUnban" /><span class="slider"></span></label>
+        </div>
+        <div class="field"><label>بعد كم ساعة</label><input id="protUnbanHrs" type="number" class="input" value="24" min="1" max="720" /></div>
+        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ</button>
+      </div>
+
+      <div class="card glass" style="grid-column:1/-1">
+        <h3>🎭 تعيين رول تلقائي <span class="sub">Auto-Role</span></h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>تفعيل التعيين التلقائي</b><div style="font-size:12px;color:var(--text-faint)">تعيين رول للأعضاء الجدد تلقائياً</div></div>
+          <label class="toggle"><input type="checkbox" id="protAutoRole" /><span class="slider"></span></label>
+        </div>
+        <div class="field"><label>الرول</label><select id="protRole" class="input"></select></div>
+        <button class="btn btn-primary w-full" onclick="saveProtection()">💾 حفظ جميع الإعدادات</button>
+      </div>
+    </div>`;
+
+  try {
+    const g = curGuild();
+    const cfg = (await API.getProtection(g)).config;
+    $("protInsult").checked = cfg.insult_protection || false;
+    $("protInsultWarns").value = cfg.insult_warns || 3;
+    $("protSpam").checked = cfg.anti_spam || false;
+    $("protSpamTh").value = cfg.spam_threshold || 5;
+    $("protSpamWin").value = cfg.spam_window || 5;
+    $("protRaid").checked = cfg.anti_raid || false;
+    $("protRaidTh").value = cfg.raid_threshold || 8;
+    $("protRaidWin").value = cfg.raid_window || 30;
+    $("protMention").checked = cfg.mass_mention || false;
+    $("protLinks").checked = cfg.link_block || false;
+    $("protUnban").checked = cfg.auto_unban || false;
+    $("protUnbanHrs").value = cfg.unban_hours || 24;
+    $("protAutoRole").checked = cfg.auto_role || false;
+
+    const roles = (await API.guildRoles(g)).roles.filter(r => !r.default);
+    $("protRole").innerHTML = roles.map(r => `<option value="${r.id}">🎭 ${esc(r.name)}</option>`).join("");
+    if (cfg.auto_role_id && $("protRole").querySelector(`option[value="${cfg.auto_role_id}"]`)) {
+      $("protRole").value = cfg.auto_role_id;
+    }
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+async function saveProtection() {
+  const g = curGuild();
+  const cfg = {
+    insult_protection: $("protInsult").checked,
+    insult_warns: parseInt($("protInsultWarns").value) || 3,
+    anti_spam: $("protSpam").checked,
+    spam_threshold: parseInt($("protSpamTh").value) || 5,
+    spam_window: parseInt($("protSpamWin").value) || 5,
+    anti_raid: $("protRaid").checked,
+    raid_threshold: parseInt($("protRaidTh").value) || 8,
+    raid_window: parseInt($("protRaidWin").value) || 30,
+    mass_mention: $("protMention").checked,
+    link_block: $("protLinks").checked,
+    auto_unban: $("protUnban").checked,
+    unban_hours: parseInt($("protUnbanHrs").value) || 24,
+    auto_role: $("protAutoRole").checked,
+    auto_role_id: $("protRole").value || null,
+  };
+  try {
+    await App.task(API.setProtection(g, cfg));
+    UI.toast("success", "✅ تم حفظ إعدادات الحماية");
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Live Stats ─────────────────────────────────────────────── */
+let _statsInterval = null;
+
+async function viewStats() {
+  if (!requireGuild()) return;
+  if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass neon-frame" id="statsHero">
+      <div class="loading"><div class="loader"></div><span>جاري تحميل الإحصائيات...</span></div>
+    </div>
+    <div id="statsBody"></div>`;
+  await loadLiveStats();
+  _statsInterval = setInterval(loadLiveStats, 10000);
+}
+
+async function loadLiveStats() {
+  const g = curGuild();
+  if (!g) { if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; } return; }
+  const hero = $("statsHero");
+  const body = $("statsBody");
+  if (!hero || !body) { if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; } return; }
+
+  try {
+    const [guildData, healthData] = await Promise.all([
+      API.guildStats(g).catch(() => null),
+      API.health().catch(() => null),
+    ]);
+
+    const s = guildData ? guildData.stats : null;
+    const h = healthData || {};
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+    const uptime = h.uptime || 0;
+    const hrs = Math.floor(uptime / 3600);
+    const mins = Math.floor((uptime % 3600) / 60);
+    const secs = Math.floor(uptime % 60);
+    const uptimeStr = `${hrs}س ${mins}د ${secs}ث`;
+
+    const cpuPct = h.cpu_percent != null ? h.cpu_percent.toFixed(1) : "—";
+    const ramPct = h.ram_percent != null ? h.ram_percent.toFixed(1) : "—";
+    const ramUsed = h.ram_used_mb != null ? h.ram_used_mb.toFixed(0) : "—";
+    const ramTotal = h.ram_total_mb != null ? h.ram_total_mb.toFixed(0) : "—";
+
+    hero.innerHTML = `
+      <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;box-shadow:none;border:none;background:transparent;padding:0;">
+        <div class="logo-ring small"><span>📊</span></div>
+        <div style="flex:1;min-width:200px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <h1 class="hero-stat gradient-text">${s ? esc(s.name) : "جاري التحميل..."}</h1>
+            <span class="chip green">● مباشر</span>
+          </div>
+          <div style="color:var(--text-dim);font-size:13px;margin-top:6px">
+            آخر تحديث: ${timeStr} · يُحدّث كل 10 ثوانٍ
+          </div>
+        </div>
+      </div>`;
+
+    body.innerHTML = `
+      <div class="grid grid-4" style="margin-top:16px">
+        <div class="stat-tile"><div class="s-icon">👥</div><div class="s-value">${s ? s.members : "—"}</div><div class="s-label">إجمالي الأعضاء</div></div>
+        <div class="stat-tile tile-green"><div class="s-icon">🟢</div><div class="s-value">${s ? s.members_online || "—" : "—"}</div><div class="s-label">متصلون الآن</div></div>
+        <div class="stat-tile tile-cyan"><div class="s-icon">💬</div><div class="s-value">${s ? s.text_channels : "—"}</div><div class="s-label">قنوات نصية</div></div>
+        <div class="stat-tile tile-magenta"><div class="s-icon">🔊</div><div class="s-value">${s ? s.voice_channels : "—"}</div><div class="s-label">قنوات صوتية</div></div>
+      </div>
+      <div class="grid grid-4" style="margin-top:16px">
+        <div class="stat-tile tile-amber"><div class="s-icon">⏱️</div><div class="s-value" style="font-size:20px">${uptimeStr}</div><div class="s-label">وقت التشغيل</div></div>
+        <div class="stat-tile tile-cyan"><div class="s-icon">🖥️</div><div class="s-value" style="font-size:20px">${cpuPct}%</div><div class="s-label">استخدام المعالج</div></div>
+        <div class="stat-tile tile-magenta"><div class="s-icon">🧠</div><div class="s-value" style="font-size:20px">${ramPct}%</div><div class="s-label">استخدام الرام</div></div>
+        <div class="stat-tile"><div class="s-icon">💾</div><div class="s-value" style="font-size:20px">${ramUsed} MB</div><div class="s-label">الرام المستخدم / ${ramTotal} MB</div></div>
+      </div>
+      <div class="grid grid-3" style="margin-top:16px">
+        <div class="stat-tile tile-green"><div class="s-icon">🎭</div><div class="s-value">${s ? s.roles : "—"}</div><div class="s-label">الرولات</div></div>
+        <div class="stat-tile tile-amber"><div class="s-icon">😀</div><div class="s-value">${s ? s.emojis : "—"}</div><div class="s-label">الرموز التعبيرية</div></div>
+        <div class="stat-tile"><div class="s-icon">🚀</div><div class="s-value">L${s ? s.boost_level : "—"}</div><div class="s-label">Boost (${s ? s.boosts : "—"})</div></div>
+      </div>
+      <div class="card glass" style="margin-top:16px">
+        <h3>📡 نشاط القنوات الصوتية</h3>
+        <div id="statsVoiceActivity" class="list" style="max-height:200px"></div>
+      </div>`;
+
+    loadVoiceActivity();
+  } catch (e) {
+    hero.innerHTML = `<div class="empty"><div class="e-icon">⚠️</div><div>تعذر جلب الإحصائيات: ${esc(e.message)}</div></div>`;
+  }
+}
+
+async function loadVoiceActivity() {
+  const box = $("statsVoiceActivity");
+  if (!box) return;
+  try {
+    const g = curGuild();
+    const data = await API.guildChannels(g);
+    const voiceChannels = data.channels.filter(c => c.type === "voice" && c.connected_members && c.connected_members.length > 0);
+    if (!voiceChannels.length) {
+      box.innerHTML = `<div class="empty"><div class="e-icon">🔇</div><div>لا يوجد نشاط في القنوات الصوتية</div></div>`;
+      return;
+    }
+    box.innerHTML = voiceChannels.map(ch => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">🔊 ${esc(ch.name)}</div>
+          <div class="li-sub">${ch.connected_members.map(m => esc(m.name || m.id)).join(" · ")}</div>
+        </div>
+        <span class="chip cyan">${ch.connected_members.length}</span>
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<div class="empty"><div class="e-icon">📡</div><div>${esc(e.message)}</div></div>`;
+  }
+}
+
+/* ── Welcome Card Designer ──────────────────────────────────── */
+async function welcomeCardView() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>🃏 مصمم بطاقة الترحيب <span class="sub">بطاقة ترحيب فخمة مع معاينة مباشرة</span></h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div>
+          <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+            <div><b>تفعيل بطاقة الترحيب</b></div>
+            <label class="toggle"><input type="checkbox" id="wcEnabled" checked /><span class="slider"></span></label>
+          </div>
+          <div class="field"><label>قناة الإرسال</label><select id="wcChannel" class="input"></select></div>
+          <div class="field"><label>العنوان — استخدم {server} و {user}</label><input id="wcTitle" class="input" value="مرحباً بك في {server}!" placeholder="مرحباً بك في {server}!" oninput="updateWelcomePreview()" /></div>
+          <div class="field"><label>العنوان الفرعي — استخدم {server} و {user}</label><input id="wcSubtitle" class="input" value="نتمنى لك وقتاً ممتعاً {user}" placeholder="نتمنى لك وقتاً ممتعاً {user}" oninput="updateWelcomePreview()" /></div>
+          <div class="field-row">
+            <div class="field"><label>لون الخلفية</label><input id="wcBgColor" type="color" class="input" value="#1a1a2e" style="height:44px;padding:4px" oninput="updateWelcomePreview()" /></div>
+            <div class="field"><label>لون النص</label><input id="wcTextColor" type="color" class="input" value="#ffffff" style="height:44px;padding:4px" oninput="updateWelcomePreview()" /></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>لون التمييز (Accent)</label><input id="wcAccentColor" type="color" class="input" value="#00d4ff" style="height:44px;padding:4px" oninput="updateWelcomePreview()" /></div>
+            <div class="field"><label>نمط الحد</label><select id="wcBorderStyle" class="input" onchange="updateWelcomePreview()">
+              <option value="neon">✨ نيون</option>
+              <option value="gradient">🌈 تدريجي</option>
+              <option value="simple">▪️ بسيط</option>
+            </select></div>
+          </div>
+          <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+            <div><b>إظهار الصورة الرمزية</b></div>
+            <label class="toggle"><input type="checkbox" id="wcShowAvatar" checked onchange="updateWelcomePreview()" /><span class="slider"></span></label>
+          </div>
+          <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+            <div><b>إظهار عدد الأعضاء</b></div>
+            <label class="toggle"><input type="checkbox" id="wcShowCount" checked onchange="updateWelcomePreview()" /><span class="slider"></span></label>
+          </div>
+          <button class="btn btn-primary w-full" onclick="saveWelcomeCard()" style="margin-top:12px">💾 حفظ إعدادات البطاقة</button>
+        </div>
+        <div>
+          <div class="section-title">👁️ معاينة مباشرة</div>
+          <div id="wcPreview" style="width:100%;aspect-ratio:3/1;border-radius:16px;overflow:hidden;position:relative;background:#1a1a2e;border:3px solid #00d4ff;display:flex;align-items:center;padding:24px;box-shadow:0 0 30px rgba(0,212,255,0.3)"></div>
+        </div>
+      </div>
+    </div>`;
+  try {
+    const opts = await channelOptions("text");
+    $("wcChannel").innerHTML = opts;
+    const cfg = (await API.getWelcomeConfig(curGuild())).config || {};
+    if (cfg.enabled !== undefined) $("wcEnabled").checked = cfg.enabled;
+    if (cfg.channel_id && $("wcChannel").querySelector(`option[value="${cfg.channel_id}"]`)) $("wcChannel").value = cfg.channel_id;
+    if (cfg.title) $("wcTitle").value = cfg.title;
+    if (cfg.subtitle) $("wcSubtitle").value = cfg.subtitle;
+    if (cfg.bg_color) $("wcBgColor").value = cfg.bg_color;
+    if (cfg.text_color) $("wcTextColor").value = cfg.text_color;
+    if (cfg.accent_color) $("wcAccentColor").value = cfg.accent_color;
+    if (cfg.border_style) $("wcBorderStyle").value = cfg.border_style;
+    if (cfg.show_avatar !== undefined) $("wcShowAvatar").checked = cfg.show_avatar;
+    if (cfg.show_count !== undefined) $("wcShowCount").checked = cfg.show_count;
+  } catch (e) { UI.toast("error", e.message); }
+  updateWelcomePreview();
+}
+
+function updateWelcomePreview() {
+  const box = $("wcPreview");
+  if (!box) return;
+  const title = ($("wcTitle") ? $("wcTitle").value : "مرحباً بك في {server}!").replace(/\{server\}/g, "سيرفرنا").replace(/\{user\}/g, "عضو جديد");
+  const subtitle = ($("wcSubtitle") ? $("wcSubtitle").value : "").replace(/\{server\}/g, "سيرفرنا").replace(/\{user\}/g, "عضو جديد");
+  const bg = $("wcBgColor") ? $("wcBgColor").value : "#1a1a2e";
+  const textCol = $("wcTextColor") ? $("wcTextColor").value : "#ffffff";
+  const accent = $("wcAccentColor") ? $("wcAccentColor").value : "#00d4ff";
+  const borderStyle = $("wcBorderStyle") ? $("wcBorderStyle").value : "neon";
+  const showAvatar = $("wcShowAvatar") ? $("wcShowAvatar").checked : true;
+  const showCount = $("wcShowCount") ? $("wcShowCount").checked : true;
+  let borderCss = "";
+  if (borderStyle === "neon") borderCss = `border:3px solid ${accent};box-shadow:0 0 30px ${accent}40, inset 0 0 30px ${accent}15`;
+  else if (borderStyle === "gradient") borderCss = `border:3px solid transparent;background-clip:padding-box;box-shadow:0 0 20px ${accent}30`;
+  else borderCss = `border:2px solid ${accent}80`;
+  let html = `<div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:6px;z-index:1">`;
+  html += `<div style="font-size:22px;font-weight:800;color:${esc(textCol)};text-shadow:0 0 10px ${accent}60">${esc(title)}</div>`;
+  if (subtitle) html += `<div style="font-size:13px;color:${esc(textCol)}cc">${esc(subtitle)}</div>`;
+  if (showCount) html += `<div style="font-size:11px;color:${esc(accent)};margin-top:4px">👥 العضو رقم #${Math.floor(Math.random() * 500) + 1}</div>`;
+  html += `</div>`;
+  if (showAvatar) html += `<div style="width:72px;height:72px;border-radius:50%;background:${esc(accent)}30;border:3px solid ${esc(accent)};display:flex;align-items:center;justify-content:center;font-size:30px;flex-shrink:0;z-index:1">👤</div>`;
+  box.style.background = `linear-gradient(135deg, ${bg}, ${bg}ee)`;
+  box.style.cssText += `;${borderCss}`;
+  box.innerHTML = html;
+}
+
+async function saveWelcomeCard() {
+  const g = curGuild();
+  const cfg = {
+    enabled: $("wcEnabled").checked,
+    channel_id: $("wcChannel").value,
+    title: $("wcTitle").value,
+    subtitle: $("wcSubtitle").value,
+    bg_color: $("wcBgColor").value,
+    text_color: $("wcTextColor").value,
+    accent_color: $("wcAccentColor").value,
+    border_style: $("wcBorderStyle").value,
+    show_avatar: $("wcShowAvatar").checked,
+    show_count: $("wcShowCount").checked,
+  };
+  try {
+    await App.task(API.setWelcomeConfig(g, cfg));
+    UI.toast("success", "✅ تم حفظ إعدادات بطاقة الترحيب");
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Embed Builder Pro ──────────────────────────────────────── */
+let _ebFields = [];
+
+function embedBuilderView() {
+  if (!requireGuild()) return;
+  _ebFields = [];
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>✨ منشئ الـ Embed الفخم <span class="sub">صمم وعاين وأرسل</span></h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div>
+          <div class="field-row">
+            <div class="field"><label>العنوان</label><input id="ebProTitle" class="input" placeholder="عنوان الـ Embed" oninput="updateEmbedPreview()" /></div>
+            <div class="field"><label>اللون</label><input id="ebProColor" type="color" class="input" value="#5865f2" style="height:44px;padding:4px" oninput="updateEmbedPreview()" /></div>
+          </div>
+          <div class="field"><label>الوصف (يدعم Markdown)</label><textarea id="ebProDesc" class="input" rows="4" placeholder="اكتب وصف الـ Embed هنا..." oninput="updateEmbedPreview()"></textarea></div>
+          <div class="field-row">
+            <div class="field"><label>اسم المؤلف</label><input id="ebProAuthor" class="input" placeholder="اسم المؤلف" oninput="updateEmbedPreview()" /></div>
+            <div class="field"><label>أيقونة المؤلف</label><input id="ebProAuthorIcon" class="input" placeholder="https://..." oninput="updateEmbedPreview()" /></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>نص الفوتر</label><input id="ebProFooter" class="input" placeholder="نص الفوتر" oninput="updateEmbedPreview()" /></div>
+            <div class="field"><label>أيقونة الفوتر</label><input id="ebProFooterIcon" class="input" placeholder="https://..." oninput="updateEmbedPreview()" /></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>رابط الصورة المصغرة (Thumbnail)</label><input id="ebProThumb" class="input" placeholder="https://..." oninput="updateEmbedPreview()" /></div>
+            <div class="field"><label>رابط الصورة الكبيرة (Image)</label><input id="ebProImage" class="input" placeholder="https://..." oninput="updateEmbedPreview()" /></div>
+          </div>
+          <div class="section-title" style="margin-top:14px">📋 الحقول <button class="btn btn-success btn-sm" onclick="ebAddField()" style="margin-right:8px">➕ إضافة حقل</button></div>
+          <div id="ebFieldsList"></div>
+          <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:140px"><label>إرسال إلى قناة</label><select id="ebProChannel" class="input"></select></div>
+            <div class="field" style="flex:0 0 auto"><label>&nbsp;</label><button class="btn btn-primary" onclick="sendEmbedPro()">📤 إرسال</button></div>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:10px">
+            <button class="btn btn-cyan" style="flex:1" onclick="copyEmbedJSON()">📋 نسخ JSON</button>
+            <button class="btn btn-danger" style="flex:1" onclick="clearEmbedForm()">🗑 مسح النموذج</button>
+          </div>
+        </div>
+        <div>
+          <div class="section-title">👁️ معاينة مباشرة</div>
+          <div id="ebProPreview" style="background:rgba(8,10,25,.7);border-radius:12px;padding:20px;min-height:300px;border:1px solid rgba(88,101,242,0.2)"></div>
+        </div>
+      </div>
+    </div>`;
+  channelOptions("text").then(opts => { if ($("ebProChannel")) $("ebProChannel").innerHTML = opts; });
+  updateEmbedPreview();
+}
+
+function ebAddField() {
+  _ebFields.push({ name: "", value: "", inline: true });
+  renderEbFields();
+  updateEmbedPreview();
+}
+
+function ebRemoveField(i) {
+  _ebFields.splice(i, 1);
+  renderEbFields();
+  updateEmbedPreview();
+}
+
+function renderEbFields() {
+  const box = $("ebFieldsList");
+  if (!box) return;
+  box.innerHTML = _ebFields.length ? _ebFields.map((f, i) => `
+    <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;margin-bottom:8px">
+      <input class="input" placeholder="اسم الحقل" value="${esc(f.name)}" oninput="_ebFields[${i}].name=this.value;updateEmbedPreview()" />
+      <input class="input" placeholder="قيمة الحقل" value="${esc(f.value)}" oninput="_ebFields[${i}].value=this.value;updateEmbedPreview()" />
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" ${f.inline ? "checked" : ""} onchange="_ebFields[${i}].inline=this.checked;updateEmbedPreview()" /> خط</label>
+      <button class="btn btn-danger btn-sm" onclick="ebRemoveField(${i})">✕</button>
+    </div>`).join("")
+    : '<div style="font-size:12px;color:var(--text-faint);padding:8px">لا حقول بعد — اضغط "إضافة حقل" لبدء البناء</div>';
+}
+
+function updateEmbedPreview() {
+  const box = $("ebProPreview");
+  if (!box) return;
+  const title = $("ebProTitle") ? $("ebProTitle").value : "";
+  const desc = $("ebProDesc") ? $("ebProDesc").value : "";
+  const color = $("ebProColor") ? $("ebProColor").value : "#5865f2";
+  const author = $("ebProAuthor") ? $("ebProAuthor").value : "";
+  const authorIcon = $("ebProAuthorIcon") ? $("ebProAuthorIcon").value : "";
+  const footer = $("ebProFooter") ? $("ebProFooter").value : "";
+  const footerIcon = $("ebProFooterIcon") ? $("ebProFooterIcon").value : "";
+  const thumb = $("ebProThumb") ? $("ebProThumb").value : "";
+  const image = $("ebProImage") ? $("ebProImage").value : "";
+
+  let h = `<div style="border-left:4px solid ${esc(color)};padding:0 16px;margin:8px 0">`;
+  if (author) h += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">${authorIcon ? `<img src="${esc(authorIcon)}" style="width:20px;height:20px;border-radius:50%" />` : ""}<span style="font-weight:700;font-size:13px;color:#fff">${esc(author)}</span></div>`;
+  if (title) h += `<div style="font-size:17px;font-weight:800;color:#fff;margin-bottom:6px">${esc(title)}</div>`;
+  if (desc) h += `<div style="font-size:14px;color:#dcddde;line-height:1.6;white-space:pre-wrap;margin-bottom:10px">${esc(desc).replace(/\*\*(.*?)\*\*/g, "<b>$1</b>").replace(/\*(.*?)\*/g, "<i>$1</i>").replace(/`(.*?)\`/g, '<code style="background:rgba(0,0,0,.4);padding:2px 6px;border-radius:4px;font-size:13px">$1</code>').replace(/\n/g, "<br>")}</div>`;
+  if (_ebFields.length) {
+    h += `<div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:10px">`;
+    _ebFields.forEach(f => {
+      const w = f.inline ? "min-width:120px;max-width:200px" : "width:100%";
+      h += `<div style="${w}"><div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:2px">${esc(f.name || "—")}</div><div style="font-size:13px;color:#dcddde">${esc(f.value || "—")}</div></div>`;
+    });
+    h += `</div>`;
+  }
+  if (thumb || image) {
+    h += `<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">`;
+    if (thumb) h += `<img src="${esc(thumb)}" style="width:80px;height:80px;border-radius:8px;object-fit:cover" />`;
+    h += `</div>`;
+    if (image) h += `<img src="${esc(image)}" style="width:100%;max-height:200px;border-radius:8px;object-fit:cover;margin-top:8px" />`;
+  }
+  if (footer) h += `<div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:#999">${footerIcon ? `<img src="${esc(footerIcon)}" style="width:16px;height:16px;border-radius:50%" />` : ""}${esc(footer)}</div>`;
+  h += `</div>`;
+  box.innerHTML = h;
+}
+
+function buildEmbedProJSON() {
+  const embed = {};
+  if ($("ebProTitle")) embed.title = $("ebProTitle").value;
+  if ($("ebProDesc")) embed.description = $("ebProDesc").value;
+  if ($("ebProColor")) embed.color = parseInt($("ebProColor").value.replace("#", ""), 16);
+  if ($("ebProAuthor") && $("ebProAuthor").value) embed.author = { name: $("ebProAuthor").value, icon_url: $("ebProAuthorIcon") ? $("ebProAuthorIcon").value : undefined };
+  if ($("ebProFooter") && $("ebProFooter").value) embed.footer = { text: $("ebProFooter").value, icon_url: $("ebProFooterIcon") ? $("ebProFooterIcon").value : undefined };
+  if ($("ebProThumb") && $("ebProThumb").value) embed.thumbnail = { url: $("ebProThumb").value };
+  if ($("ebProImage") && $("ebProImage").value) embed.image = { url: $("ebProImage").value };
+  if (_ebFields.length) embed.fields = _ebFields.filter(f => f.name || f.value).map(f => ({ name: f.name, value: f.value, inline: f.inline }));
+  embed.timestamp = new Date().toISOString();
+  return embed;
+}
+
+async function sendEmbedPro() {
+  const ch = $("ebProChannel") ? $("ebProChannel").value : "";
+  if (!ch) return UI.toast("warn", "اختر قناة للإرسال");
+  try {
+    const embed = buildEmbedProJSON();
+    await App.task(API.sendEmbed(ch, embed));
+    UI.toast("success", "✅ تم إرسال الـ Embed بنجاح");
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+function copyEmbedJSON() {
+  const json = JSON.stringify(buildEmbedProJSON(), null, 2);
+  navigator.clipboard.writeText(json).then(() => UI.toast("success", "📋 نُسخ JSON الـ Embed")).catch(() => UI.toast("warn", "تعذر النسخ"));
+}
+
+function clearEmbedForm() {
+  ["ebProTitle", "ebProDesc", "ebProAuthor", "ebProAuthorIcon", "ebProFooter", "ebProFooterIcon", "ebProThumb", "ebProImage"].forEach(id => { if ($(id)) $(id).value = ""; });
+  if ($("ebProColor")) $("ebProColor").value = "#5865f2";
+  _ebFields = [];
+  renderEbFields();
+  updateEmbedPreview();
+  UI.toast("info", "🗑 تم مسح جميع الحقول");
+}
+
 /* ── Router ─────────────────────────────────────────────────── */
 window.Views = {
   dashboard: viewDashboard,
@@ -1658,4 +2157,8 @@ window.Views = {
   search: viewSearch,
   audit: viewAudit,
   tools: viewTools,
+  protection: viewProtection,
+  stats: viewStats,
+  welcomeCard: welcomeCardView,
+  embedBuilder: embedBuilderView,
 };

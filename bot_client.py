@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
@@ -247,7 +248,7 @@ def _load_welcome_from_config() -> dict:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("welcome", {})
+        return data.get("welcome_config", data.get("welcome", {}))
     except Exception:
         return {}
 
@@ -261,6 +262,15 @@ def _load_automod_from_config() -> dict:
         return {}
 
 
+def _load_protection_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("protection", {})
+    except Exception:
+        return {}
+
+
 class BotManager:
     def __init__(self):
         self.client: Optional[discord.Client] = None
@@ -270,6 +280,7 @@ class BotManager:
         self.guilds: list[discord.Guild] = []
         self.welcome_config: dict = _load_welcome_from_config()
         self.automod_config: dict = _load_automod_from_config()
+        self.protection_config: dict = _load_protection_from_config()
         self.activity_log: list[str] = []
         self.voice_clients: dict[int, discord.VoiceClient] = {}
         self.now_playing: dict[int, str] = {}
@@ -285,6 +296,9 @@ class BotManager:
         self.np_info: dict[int, dict] = {}             # Now playing details: {title, url, thumbnail, duration, requester, channel}
         self._join_log: dict[int, list] = {}
         self._spam_log: dict[int, dict] = {}
+        self._bot_insult_warns: dict[int, dict] = {}
+        self._protection_spam_log: dict[int, dict] = {}
+        self._protection_join_log: dict[int, list] = {}
         self.log_channels: dict[int, int] = {}
         self.scheduled_messages: list = []
         self.ticket_config: dict[int, dict] = {}
@@ -372,6 +386,7 @@ class BotManager:
             self._log_activity(f"✅ انضم {member.display_name} إلى {member.guild.name}")
             await self._handle_member_join(member)
             await self._handle_raid(member)
+            await self._handle_auto_role(member)
             await self._send_log(member.guild.id, f"👋 **دخول عضو جديد** {member.mention} ({member.display_name}) — {member.guild.name}")
 
         @self.client.event
@@ -397,6 +412,10 @@ class BotManager:
                 await self._handle_music_command(message)
                 return
             await self._handle_automod(message)
+            await self._handle_bot_insult(message)
+            await self._handle_link_block(message)
+            await self._handle_spam_protection(message)
+            await self._handle_mass_mention(message)
 
         @self.client.event
         async def on_voice_state_update(member: discord.Member, before, after):
@@ -482,6 +501,7 @@ class BotManager:
             await asyncio.wait_for(ready_future, timeout=40)
             asyncio.create_task(self._reminder_worker())
             asyncio.create_task(self._scheduled_worker())
+            asyncio.create_task(self._auto_unban_worker())
             return True, f"متصل: {self.user} | {len(self.guilds)} سيرفر"
         except discord.LoginFailure:
             await self._disconnect_async()
@@ -820,33 +840,35 @@ class BotManager:
         cfg = self.welcome_config.get(str(guild_id), {})
         return {
             "enabled": cfg.get("enabled", False),
-            "channel_id": cfg.get("channel_id", ""),
-            "message": cfg.get(
-                "message",
-                "مرحباً {user} في سيرفر {server}! 🎉 أنت العضو رقم {count}",
-            ),
-            "image_enabled": cfg.get("image_enabled", False),
+            "channel_id": cfg.get("channel_id", 0),
+            "title": cfg.get("title", "Welcome to {server}!"),
+            "subtitle": cfg.get("subtitle", "Enjoy your stay, {user}!"),
+            "bg_color": cfg.get("bg_color", "#1a1a2e"),
+            "text_color": cfg.get("text_color", "#00ff88"),
+            "accent_color": cfg.get("accent_color", "#5865F2"),
+            "show_avatar": cfg.get("show_avatar", True),
+            "show_member_count": cfg.get("show_member_count", True),
+            "border_style": cfg.get("border_style", "neon"),
+            "custom_image": cfg.get("custom_image", ""),
         }
 
-    def set_welcome_config(
-        self, guild_id: int, enabled: bool, channel_id: str, message: str, image_enabled: bool = False
-    ) -> tuple[bool, str]:
-        self.welcome_config[str(guild_id)] = {
-            "enabled": enabled,
-            "channel_id": channel_id.strip(),
-            "message": message.strip(),
-            "image_enabled": image_enabled,
-        }
+    def set_welcome_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.welcome_config:
+            self.welcome_config[gid] = {}
+        for key, value in kwargs.items():
+            self.welcome_config[gid][key] = value
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 config = json.load(f)
         except Exception:
             config = {}
-        config["welcome"] = self.welcome_config
+        config["welcome_config"] = self.welcome_config
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
+        enabled = self.welcome_config[gid].get("enabled", False)
         status = "مفعّل" if enabled else "معطّل"
-        return True, f"تم حفظ إعدادات الترحيب ({status})"
+        return True, f"تم حفظ إعدادات بطاقة الترحيب ({status})"
 
     def _format_welcome_message(self, member: discord.Member, template: str) -> str:
         return (
@@ -861,39 +883,8 @@ class BotManager:
         cfg = self.get_welcome_config(member.guild.id)
         if not cfg["enabled"]:
             return
-
-        channel_id = cfg.get("channel_id")
-        if not channel_id:
-            return
-
-        channel = self.client.get_channel(int(channel_id))
-        if not channel:
-            try:
-                channel = await self.client.fetch_channel(int(channel_id))
-            except Exception:
-                return
-
-        if cfg.get("image_enabled"):
-            try:
-                buf = await self.generate_welcome_image(member)
-                if buf:
-                    await channel.send(file=discord.File(buf, "welcome.png"))
-                    log_msg = f"👋 صورة ترحيب: {member.display_name} في {member.guild.name}"
-                    if self._welcome_log_callback:
-                        self._welcome_log_callback(log_msg)
-                    return
-            except Exception as e:
-                if self._welcome_log_callback:
-                    self._welcome_log_callback(f"فشل صورة الترحيب: {e}")
-        text = self._format_welcome_message(member, cfg["message"])
         try:
-            await channel.send(text)
-            log_msg = f"👋 ترحيب: {member.display_name} في {member.guild.name}"
-            if self._welcome_log_callback:
-                self._welcome_log_callback(log_msg)
-        except discord.Forbidden:
-            if self._welcome_log_callback:
-                self._welcome_log_callback(f"لا توجد صلاحية للترحيب في {member.guild.name}")
+            await self._send_welcome_card(member)
         except Exception as e:
             if self._welcome_log_callback:
                 self._welcome_log_callback(f"فشل الترحيب: {e}")
@@ -1063,6 +1054,260 @@ class BotManager:
             except Exception:
                 pass
 
+    # ── Server Protection System ──────────────────────────────
+
+    def get_protection_config(self, guild_id: int) -> dict:
+        cfg = self.protection_config.get(str(guild_id), {})
+        return {
+            "bot_insult_kick": cfg.get("bot_insult_kick", False),
+            "bot_insult_warns_before_kick": cfg.get("bot_insult_warns_before_kick", 2),
+            "max_warnings_before_ban": cfg.get("max_warnings_before_ban", 5),
+            "anti_mass_mention": cfg.get("anti_mass_mention", False),
+            "mass_mention_threshold": cfg.get("mass_mention_threshold", 5),
+            "link_block_enabled": cfg.get("link_block_enabled", False),
+            "link_block_channels": cfg.get("link_block_channels", []),
+            "link_block_whitelist": cfg.get("link_block_whitelist", []),
+            "auto_unban_enabled": cfg.get("auto_unban_enabled", False),
+            "auto_unban_hours": cfg.get("auto_unban_hours", 24),
+            "auto_role_enabled": cfg.get("auto_role_enabled", False),
+            "auto_role_id": cfg.get("auto_role_id", 0),
+            "spam_protection": cfg.get("spam_protection", False),
+            "spam_threshold": cfg.get("spam_threshold", 5),
+            "spam_window": cfg.get("spam_window", 3),
+            "raid_protection": cfg.get("raid_protection", False),
+            "raid_threshold": cfg.get("raid_threshold", 10),
+            "raid_window": cfg.get("raid_window", 60),
+            "greeting_protection": cfg.get("greeting_protection", False),
+        }
+
+    def set_protection_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.protection_config:
+            self.protection_config[gid] = {}
+        for key, value in kwargs.items():
+            self.protection_config[gid][key] = value
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["protection"] = self.protection_config
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True, "تم حفظ إعدادات الحماية"
+
+    async def _handle_bot_insult(self, message: discord.Message):
+        cfg = self.get_protection_config(message.guild.id)
+        if not cfg.get("bot_insult_kick"):
+            return
+        if not self.client.user:
+            return
+        if message.author.id == self.client.user.id:
+            return
+        content = message.content.lower()
+        bot_mentioned = self.client.user in message.mentions
+        insult_patterns = [
+            r'\bbot\b', r'\bبوت\b', r'\bحقير\b', r'\bسخيف\b', r'\bقذر\b', r'\btافه\b',
+            r'\bزبالة\b', r'\bغبي\b', r'\bakil\b', r'\bstupid\b', r'\bidiot\b', r'\bgarbage\b',
+            r'\btrash\b', r'\buseless\b', r'\bعميل\b', r'\bmisht\b', r'\bkharban\b',
+            r'\bمنحرف\b', r'\bخسيس\b', r'\bwasekh\b', r'\bhaywan\b', r'\bحيوان\b',
+            r'\bكسول\b', r'\blazy\b', r'\bحمار\b', r'\bdonkey\b', r'\bكلب\b', r'\bdog\b',
+        ]
+        is_insult = False
+        if bot_mentioned:
+            for pat in insult_patterns:
+                if re.search(pat, content):
+                    is_insult = True
+                    break
+        if not is_insult:
+            return
+        gid = message.guild.id
+        uid = message.author.id
+        if gid not in self._bot_insult_warns:
+            self._bot_insult_warns[gid] = {}
+        if uid not in self._bot_insult_warns[gid]:
+            self._bot_insult_warns[gid][uid] = 0
+        self._bot_insult_warns[gid][uid] += 1
+        warn_count = self._bot_insult_warns[gid][uid]
+        kick_threshold = cfg.get("bot_insult_warns_before_kick", 2)
+        ban_threshold = cfg.get("max_warnings_before_ban", 5)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        try:
+            member = message.guild.get_member(uid)
+            if not member:
+                return
+            if warn_count >= ban_threshold:
+                await message.guild.ban(member, reason=f"إهانة البوت {warn_count} مرات — حظر تلقائي")
+                self._log_activity(f"🔨 حظر {member.display_name} — إهانة البوت ({warn_count} مرات)")
+                await self._send_log(gid, f"🔨 **حظر تلقائي** — {member.mention} أهان البوت {warn_count} مرات")
+                self._bot_insult_warns[gid].pop(uid, None)
+            elif warn_count >= kick_threshold:
+                await member.kick(reason=f"إهانة البوت {warn_count} مرات — طرد تلقائي")
+                self._log_activity(f"👢 طرد {member.display_name} — إهانة البوت ({warn_count} مرات)")
+                await self._send_log(gid, f"👢 **طرد تلقائي** — {member.mention} أهان البوت {warn_count} مرات")
+                self._bot_insult_warns[gid].pop(uid, None)
+            else:
+                await message.channel.send(
+                    f"⚠️ {member.mention} تحذير {warn_count}/{kick_threshold} — لا تهين البوت!",
+                    delete_after=5
+                )
+                self._log_activity(f"⚠️ تحذير {member.display_name} — إهانة البوت ({warn_count}/{kick_threshold})")
+        except discord.Forbidden:
+            pass
+        except Exception:
+            pass
+
+    async def _handle_link_block(self, message: discord.Message):
+        cfg = self.get_protection_config(message.guild.id)
+        if not cfg.get("link_block_enabled"):
+            return
+        link_pattern = r'https?://[^\s]+|www\.[^\s]+|discord\.gg/[^\s]+|discord\.com/invite/[^\s]+'
+        if not re.search(link_pattern, message.content):
+            return
+        channel_id = message.channel.id
+        block_channels = cfg.get("link_block_channels", [])
+        if block_channels and channel_id not in block_channels:
+            return
+        whitelist = cfg.get("link_block_whitelist", [])
+        content_lower = message.content.lower()
+        for url in whitelist:
+            if url.lower() in content_lower:
+                return
+        perms = message.author.guild_permissions
+        if perms.administrator or perms.manage_guild:
+            return
+        try:
+            await message.delete()
+            self._log_activity(f"🔗 حذف رسالة برابط من {message.author.display_name} في #{message.channel.name}")
+            await self._send_log(
+                message.guild.id,
+                f"🔗 **حجب رابط** — تم حذف رسالة من {message.author.display_name} في #{message.channel.name}\n> الرابط محجوب في هذه القناة"
+            )
+        except discord.Forbidden:
+            pass
+        except Exception:
+            pass
+
+    async def _handle_spam_protection(self, message: discord.Message):
+        cfg = self.get_protection_config(message.guild.id)
+        if not cfg.get("spam_protection"):
+            return
+        gid = message.guild.id
+        uid = message.author.id
+        now = datetime.now(timezone.utc).timestamp()
+        if gid not in self._protection_spam_log:
+            self._protection_spam_log[gid] = {}
+        if uid not in self._protection_spam_log[gid]:
+            self._protection_spam_log[gid][uid] = []
+        self._protection_spam_log[gid][uid].append(now)
+        window = cfg.get("spam_window", 3)
+        cutoff = now - window
+        self._protection_spam_log[gid][uid] = [t for t in self._protection_spam_log[gid][uid] if t > cutoff]
+        threshold = cfg.get("spam_threshold", 5)
+        if len(self._protection_spam_log[gid][uid]) >= threshold:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                member = message.guild.get_member(uid)
+                if member:
+                    until = datetime.now(timezone.utc) + timedelta(minutes=5)
+                    await member.timeout(until, reason=f"سبام حماية — {len(self._protection_spam_log[gid][uid])} رسائل في {window}ث")
+                    self._log_activity(f"🚫 تايم أوت {member.display_name} — سبام حماية ({len(self._protection_spam_log[gid][uid])} رسائل في {window}ث)")
+                    await self._send_log(
+                        gid,
+                        f"🚫 **حماية السبام** — تايم أوت {member.mention} لمدة 5 دقائق\n> السبب: {len(self._protection_spam_log[gid][uid])} رسائل في {window} ثانية"
+                    )
+            except discord.Forbidden:
+                pass
+            except Exception:
+                pass
+            self._protection_spam_log[gid][uid] = []
+
+    async def _handle_auto_role(self, member: discord.Member):
+        cfg = self.get_protection_config(member.guild.id)
+        if not cfg.get("auto_role_enabled"):
+            return
+        role_id = cfg.get("auto_role_id", 0)
+        if not role_id:
+            return
+        role = member.guild.get_role(role_id)
+        if not role:
+            return
+        try:
+            await member.add_roles(role, reason="Auto role on join")
+            self._log_activity(f"🎖️ تم إعطاء رول تلقائي {role.name} لـ {member.display_name} في {member.guild.name}")
+        except discord.Forbidden:
+            pass
+        except Exception:
+            pass
+
+    async def _handle_auto_unban(self, guild: discord.Guild):
+        cfg = self.get_protection_config(guild.id)
+        if not cfg.get("auto_unban_enabled"):
+            return
+        hours = cfg.get("auto_unban_hours", 24)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        try:
+            async for ban_entry in guild.bans(limit=100):
+                if ban_entry.user.id == self.client.user.id:
+                    continue
+                if ban_entry.user.bot:
+                    continue
+                if ban_entry.reason and "حماية" in ban_entry.reason:
+                    continue
+                try:
+                    await guild.unban(ban_entry.user, reason="إلغاء حظر تلقائي — انتهت المدة")
+                    self._log_activity(f"✅ فك حظر تلقائي {ban_entry.user} من {guild.name} (بعد {hours} ساعة)")
+                    await self._send_log(guild.id, f"✅ **فك حظر تلقائي** — {ban_entry.user} بعد {hours} ساعة")
+                except Exception:
+                    pass
+        except discord.Forbidden:
+            pass
+        except Exception:
+            pass
+
+    async def _handle_mass_mention(self, message: discord.Message):
+        cfg = self.get_protection_config(message.guild.id)
+        if not cfg.get("anti_mass_mention"):
+            return
+        mention_count = len(message.mentions) + message.content.count("@everyone") + message.content.count("@here")
+        threshold = cfg.get("mass_mention_threshold", 5)
+        if mention_count < threshold:
+            return
+        perms = message.author.guild_permissions
+        if perms.administrator or perms.manage_guild:
+            return
+        try:
+            await message.delete()
+            self._log_activity(f"📢 حذف رسالة منشن جماعي من {message.author.display_name} ({mention_count} منشن)")
+            await self._send_log(
+                message.guild.id,
+                f"📢 **منشن جماعي** — تم حذف رسالة من {message.author.display_name} في #{message.channel.name}\n> عدد المنشن: {mention_count}"
+            )
+        except discord.Forbidden:
+            pass
+        except Exception:
+            pass
+
+    async def _auto_unban_worker(self):
+        await asyncio.sleep(30)
+        while True:
+            try:
+                if self.client and self.guilds:
+                    for guild in self.guilds:
+                        try:
+                            await self._handle_auto_unban(guild)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            await asyncio.sleep(300)
+
 
 # ═══════════════════════════════════════════════════════════
 # NEW FEATURES: Welcome Image, Reminder, Music, DM All, Warns
@@ -1145,6 +1390,131 @@ class BotManager:
             )
         except Exception:
             return None
+
+    # ── Welcome Card Designer ────────────────────────────────
+
+    def _generate_welcome_card(self, member_name: str, server_name: str, member_count: int,
+                                avatar_data: bytes, config: dict) -> io.BytesIO:
+        W, H = 900, 300
+
+        def hex_to_rgb(hex_color: str) -> tuple:
+            hex_color = hex_color.lstrip("#")
+            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+        bg_color = hex_to_rgb(config.get("bg_color", "#1a1a2e"))
+        text_color = hex_to_rgb(config.get("text_color", "#00ff88"))
+        accent_color = hex_to_rgb(config.get("accent_color", "#5865F2"))
+
+        img = Image.new("RGB", (W, H), bg_color)
+        draw = ImageDraw.Draw(img)
+
+        border_style = config.get("border_style", "neon")
+
+        if border_style == "gradient":
+            for y in range(H):
+                ratio = y / H
+                r = int(bg_color[0] + (accent_color[0] - bg_color[0]) * ratio * 0.3)
+                g = int(bg_color[1] + (accent_color[1] - bg_color[1]) * ratio * 0.3)
+                b = int(bg_color[2] + (accent_color[2] - bg_color[2]) * ratio * 0.3)
+                draw.line([(0, y), (W, y)], fill=(r, g, b))
+        else:
+            for y in range(H):
+                ratio = y / H
+                factor = 0.15 * ratio
+                r = int(bg_color[0] + (255 - bg_color[0]) * factor)
+                g = int(bg_color[1] + (255 - bg_color[1]) * factor)
+                b = int(bg_color[2] + (255 - bg_color[2]) * factor)
+                draw.line([(0, y), (W, y)], fill=(r, g, b))
+
+        if border_style == "neon":
+            glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            gd = ImageDraw.Draw(glow)
+            gd.ellipse([280, 15, 620, 285], fill=(*accent_color, 45))
+            glow = glow.filter(ImageFilter.GaussianBlur(45))
+            img = Image.alpha_composite(img.convert("RGBA"), glow).convert("RGB")
+            draw = ImageDraw.Draw(img)
+
+        font_big, font_sm = BotManager._find_font(44, 18)
+
+        if config.get("show_avatar", True) and avatar_data:
+            try:
+                av = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
+                av = av.resize((140, 140), Image.LANCZOS)
+                mask = Image.new("L", (140, 140), 0)
+                ImageDraw.Draw(mask).ellipse([0, 0, 140, 140], fill=255)
+                circ = Image.new("RGBA", (140, 140), (0, 0, 0, 0))
+                circ.paste(av, (0, 0), mask)
+                border = Image.new("RGBA", (148, 148), (0, 0, 0, 0))
+                ImageDraw.Draw(border).ellipse([0, 0, 148, 148], fill=(*accent_color, 255))
+                img.paste(border, (40, H // 2 - 74), border)
+                img.paste(circ, (44, H // 2 - 70), circ)
+            except Exception:
+                pass
+
+        title = config.get("title", "Welcome to {server}!").replace("{server}", server_name)
+        tx = 210
+        draw.text((tx, 55), title, fill=text_color, font=font_big)
+
+        subtitle = config.get("subtitle", "Enjoy your stay, {user}!").replace("{user}", f"@{member_name}")
+        draw.text((tx, 115), subtitle, fill=(200, 200, 200), font=font_sm)
+
+        if config.get("show_member_count", True):
+            count_text = f"Member #{member_count}  ·  {server_name}"
+            draw.text((tx, 160), count_text, fill=(148, 155, 164), font=font_sm)
+
+        draw.line([(tx, 210), (tx + 250, 210)], fill=accent_color, width=2)
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        buf.seek(0)
+        return buf
+
+    async def _send_welcome_card(self, member: discord.Member):
+        config = self.get_welcome_config(member.guild.id)
+        if not config.get("enabled"):
+            return
+
+        channel_id = config.get("channel_id")
+        if not channel_id:
+            return
+
+        channel = self.client.get_channel(channel_id)
+        if not channel:
+            try:
+                channel = await self.client.fetch_channel(channel_id)
+            except Exception:
+                return
+
+        avatar_data = b""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(str(member.display_avatar.url)) as resp:
+                    avatar_data = await resp.read()
+        except Exception:
+            pass
+
+        loop = asyncio.get_event_loop()
+        buf = await loop.run_in_executor(
+            None, self._generate_welcome_card,
+            member.display_name, member.guild.name, member.guild.member_count,
+            avatar_data, config,
+        )
+
+        title = config.get("title", "Welcome to {server}!").replace("{server}", member.guild.name)
+        subtitle = config.get("subtitle", "Enjoy your stay, {user}!").replace("{user}", member.mention)
+        text = f"{title}\n{subtitle}"
+
+        try:
+            await channel.send(content=text, file=discord.File(buf, "welcome_card.png"))
+            log_msg = f"👋 بطاقة ترحيب: {member.display_name} في {member.guild.name}"
+            if self._welcome_log_callback:
+                self._welcome_log_callback(log_msg)
+        except discord.Forbidden:
+            if self._welcome_log_callback:
+                self._welcome_log_callback(f"لا توجد صلاحية للترحيب في {member.guild.name}")
+        except Exception as e:
+            if self._welcome_log_callback:
+                self._welcome_log_callback(f"فشل إرسال بطاقة الترحيب: {e}")
 
     # ── Reminder System ──────────────────────────────────────
 

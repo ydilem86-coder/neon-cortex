@@ -102,6 +102,9 @@ const UI = {
 };
 
 /* ── Theme Toggle ── */
+const THEMES = ["dark", "light", "neon", "cyberpunk"];
+const THEME_ICONS = { dark: "🌙", light: "☀️", neon: "💚", cyberpunk: "💜" };
+
 function initTheme() {
   const saved = localStorage.getItem("nc_theme") || "dark";
   document.documentElement.setAttribute("data-theme", saved);
@@ -110,7 +113,8 @@ function initTheme() {
 
 function toggleTheme() {
   const current = document.documentElement.getAttribute("data-theme");
-  const next = current === "dark" ? "light" : "dark";
+  const idx = THEMES.indexOf(current);
+  const next = THEMES[(idx + 1) % THEMES.length];
   document.documentElement.setAttribute("data-theme", next);
   localStorage.setItem("nc_theme", next);
   updateThemeIcon(next);
@@ -118,7 +122,7 @@ function toggleTheme() {
 
 function updateThemeIcon(theme) {
   const btn = $("themeToggle");
-  if (btn) btn.textContent = theme === "dark" ? "🌙" : "☀️";
+  if (btn) btn.textContent = THEME_ICONS[theme] || "🌙";
 }
 
 /* ── Background particles ── */

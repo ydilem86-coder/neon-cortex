@@ -138,6 +138,14 @@ const API = (() => {
 
     getAuditLog: (limit) => request("GET", `/api/audit-log${limit ? "?limit=" + limit : ""}`),
     clearAuditLog: () => request("DELETE", "/api/audit-log"),
+
+    getProtection: (gid) => request("GET", `/api/guilds/${gid}/protection`),
+    setProtection: (gid, cfg) => request("POST", `/api/guilds/${gid}/protection`, cfg),
+
+    getWelcomeConfig: (gid) => request("GET", `/api/guilds/${gid}/welcome-config`),
+    setWelcomeConfig: (gid, cfg) => request("POST", `/api/guilds/${gid}/welcome-config`, cfg),
+    sendEmbed: (gid, embed) => request("POST", `/api/guilds/${gid}/embed/send`, embed),
+    health: () => request("GET", "/api/health"),
     getUsers: () => request("GET", "/api/admin/users"),
     addUser: (user) => request("POST", "/api/admin/users", user),
     deleteUser: (username) => request("DELETE", `/api/admin/users/${username}`),

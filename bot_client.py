@@ -22,7 +22,13 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 def _get_ytdlp_opts() -> dict:
     """Get yt-dlp options with cookies if available."""
-    opts = {"format": "best", "quiet": True, "no_warnings": True, "extract_flat": False}
+    opts = {
+        "format": "bestaudio/best",
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": False,
+        "extractor_args": {"youtube": {"player_client": ["web", "mweb"]}},
+    }
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
     return opts

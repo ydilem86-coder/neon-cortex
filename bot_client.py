@@ -110,6 +110,28 @@ def _ytdlp_search(query: str, limit: int = 5) -> list:
             pass
     return results
 
+
+async def _resolve_spotify_url(url: str) -> tuple[str, str]:
+    """Resolve a Spotify URL to track name + artist. Returns (query, thumbnail)."""
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://open.spotify.com/oembed?url={url}") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    title = data.get("title", "")
+                    thumbnail = data.get("thumbnail_url", "")
+                    return f"{title} audio", thumbnail
+    except Exception:
+        pass
+    # Fallback: extract from URL
+    return url, ""
+
+
+def _is_spotify_url(url: str) -> bool:
+    """Check if URL is a Spotify link."""
+    return "open.spotify.com" in url or "spotify.link" in url
+
 MUSIC_PREFIX = "!"
 
 
@@ -1540,8 +1562,17 @@ class BotManager:
         if not vc:
             return False, "البوت ليس في قناة صوتية"
         try:
-            import yt_dlp
-            source_url = url if (url and url.startswith("http")) else f"ytsearch1:{url}"
+            source_url = url
+
+            # Handle Spotify URLs
+            if _is_spotify_url(url):
+                query, thumb = await _resolve_spotify_url(url)
+                source_url = f"ytsearch1:{query}"
+
+            # Handle plain text search
+            if not source_url.startswith("http"):
+                source_url = f"ytsearch1:{source_url}"
+
             loop = asyncio.get_event_loop()
             info = await loop.run_in_executor(None, lambda: _ytdlp_extract_info(source_url))
             if not url or not url.startswith("http"):

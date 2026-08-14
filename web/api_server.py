@@ -12,7 +12,7 @@ import hashlib
 import secrets
 import json
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import discord
 

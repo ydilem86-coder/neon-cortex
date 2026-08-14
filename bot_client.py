@@ -53,7 +53,6 @@ def _ytdlp_extract_info(url: str, download: bool = False) -> dict:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except FileNotFoundError:
-        # yt-dlp not found as binary, try python module
         cmd = ["python", "-m", "yt_dlp"] + cmd[1:]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
@@ -81,6 +80,70 @@ def _ytdlp_extract_info(url: str, download: bool = False) -> dict:
             data["ext"] = best.get("ext", "mp3")
 
     return data
+
+
+async def _invidious_search(query: str, limit: int = 5) -> list:
+    """Search via Invidious API as fallback."""
+    import aiohttp
+    instances = [
+        "https://vid.puffyan.us",
+        "https://inv.tux.pizza",
+        "https://invidious.snopyta.org",
+        "https://yewtu.be",
+        "https://inv.nadeko.net",
+    ]
+    for instance in instances:
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{instance}/api/v1/search?q={query}&type=video"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        results = []
+                        for v in data[:limit]:
+                            vid_id = v.get("videoId", "")
+                            results.append({
+                                "title": v.get("title", "?"),
+                                "url": f"https://www.youtube.com/watch?v={vid_id}",
+                                "duration": int(v.get("lengthSeconds", 0)),
+                                "thumbnail": f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg",
+                            })
+                        if results:
+                            return results
+        except Exception:
+            continue
+    return []
+
+
+async def _invidious_extract(video_id: str) -> dict:
+    """Get video info via Invidious API as fallback."""
+    import aiohttp
+    instances = [
+        "https://vid.puffyan.us",
+        "https://inv.tux.pizza",
+        "https://invidious.snopyta.org",
+        "https://yewtu.be",
+        "https://inv.nadeko.net",
+    ]
+    for instance in instances:
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{instance}/api/v1/videos/{video_id}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # Find best audio format
+                        for fmt in data.get("adaptiveFormats", []):
+                            if fmt.get("type", "").startswith("audio"):
+                                return {
+                                    "url": fmt.get("url", ""),
+                                    "title": data.get("title", ""),
+                                    "thumbnail": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
+                                    "duration": int(data.get("lengthSeconds", 0)),
+                                }
+        except Exception:
+            continue
+    raise Exception("Invidious: No audio stream found")
 
 
 def _ytdlp_search(query: str, limit: int = 5) -> list:
@@ -1531,16 +1594,30 @@ class BotManager:
                 try:
                     info = _ytdlp_extract_info(url)
                     audio_url = info["url"]
-                    ffopts = {"before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5", "options": "-vn"}
-                    ffmpeg_exe = self._ffmpeg_exe()
-                    if ffmpeg_exe:
-                        ffopts["executable"] = ffmpeg_exe
-                    source = discord.FFmpegPCMAudio(audio_url, **ffopts)
-                    vol = self.music_volumes.get(guild_id, 1.0)
-                    source = discord.PCMVolumeTransformer(source, volume=vol)
-                    vc.play(source, after=lambda e: self._play_next(guild_id, e))
                 except Exception:
-                    pass
+                    import re as _re
+                    vid_match = _re.search(r"v=([a-zA-Z0-9_-]+)", url)
+                    if vid_match:
+                        try:
+                            loop = asyncio.new_event_loop()
+                            info = loop.run_until_complete(_invidious_extract(vid_match.group(1)))
+                            audio_url = info["url"]
+                        except Exception:
+                            pass
+                    else:
+                        audio_url = None
+                if audio_url:
+                    try:
+                        ffopts = {"before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5", "options": "-vn"}
+                        ffmpeg_exe = self._ffmpeg_exe()
+                        if ffmpeg_exe:
+                            ffopts["executable"] = ffmpeg_exe
+                        source = discord.FFmpegPCMAudio(audio_url, **ffopts)
+                        vol = self.music_volumes.get(guild_id, 1.0)
+                        source = discord.PCMVolumeTransformer(source, volume=vol)
+                        vc.play(source, after=lambda e: self._play_next(guild_id, e))
+                    except Exception:
+                        pass
             return
 
         if not queue:
@@ -1571,6 +1648,7 @@ class BotManager:
         requester = next_item.get("requester", "")
         channel = next_item.get("channel", "")
 
+        audio_url = None
         try:
             info = _ytdlp_extract_info(url)
             audio_url = info["url"]
@@ -1579,6 +1657,17 @@ class BotManager:
                 thumbnail = info.get("thumbnail", "")
             if not duration:
                 duration = int(info.get("duration") or 0)
+        except Exception:
+            import re as _re
+            vid_match = _re.search(r"v=([a-zA-Z0-9_-]+)", url)
+            if vid_match:
+                try:
+                    loop = asyncio.new_event_loop()
+                    info = loop.run_until_complete(_invidious_extract(vid_match.group(1)))
+                    audio_url = info["url"]
+                    title = info.get("title", title)
+                except Exception:
+                    pass
 
             ffopts = {"before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5", "options": "-vn"}
             ffmpeg_exe = self._ffmpeg_exe()
@@ -1619,7 +1708,30 @@ class BotManager:
                 source_url = f"ytsearch1:{source_url}"
 
             loop = asyncio.get_event_loop()
-            info = await loop.run_in_executor(None, lambda: _ytdlp_extract_info(source_url))
+
+            # Try yt-dlp first
+            info = None
+            try:
+                info = await loop.run_in_executor(None, lambda: _ytdlp_extract_info(source_url))
+            except Exception:
+                pass
+
+            # Fallback to Invidious
+            if not info or not info.get("url"):
+                import re as _re
+                vid_match = _re.search(r"v=([a-zA-Z0-9_-]+)", source_url)
+                if vid_match:
+                    info = await _invidious_extract(vid_match.group(1))
+                elif source_url.startswith("ytsearch1:"):
+                    query = source_url.replace("ytsearch1:", "")
+                    results = await _invidious_search(query, 1)
+                    if results:
+                        vid_match2 = _re.search(r"v=([a-zA-Z0-9_-]+)", results[0]["url"])
+                        if vid_match2:
+                            info = await _invidious_extract(vid_match2.group(1))
+
+            if not info or not info.get("url"):
+                return False, "فشل جلب الأغنية"
             if not url or not url.startswith("http"):
                 info = info.get("entries", [info])[0] if info.get("entries") else info
             audio_url = info["url"]
@@ -1683,10 +1795,17 @@ class BotManager:
         try:
             results = _ytdlp_search(query, limit)
             return True, results
-        except ImportError:
-            return False, "yt-dlp غير مثبت. شغّل: pip install yt-dlp"
-        except Exception as e:
-            return False, f"فشل البحث: {e}"
+        except Exception:
+            pass
+        # Fallback: Invidious
+        try:
+            loop = asyncio.get_event_loop()
+            results = loop.run_until_complete(_invidious_search(query, limit))
+            if results:
+                return True, results
+        except Exception:
+            pass
+        return False, "فشل البحث"
 
     def clear_queue(self, guild_id: int):
         self.music_queues.pop(guild_id, None)
@@ -2078,8 +2197,16 @@ bot_manager = BotManager()
 
 
 def _yt_search(query: str, limit: int = 5) -> list:
-    """Fast YouTube search returning title, url, thumbnail, duration."""
-    return _ytdlp_search(query, limit)
+    """Fast YouTube search - try yt-dlp then Invidious."""
+    try:
+        return _ytdlp_search(query, limit)
+    except Exception:
+        import asyncio
+        try:
+            loop = asyncio.new_event_loop()
+            return loop.run_until_complete(_invidious_search(query, limit))
+        except Exception:
+            return []
 
 
 async def _yt_search_async(query: str, limit: int = 5) -> list:

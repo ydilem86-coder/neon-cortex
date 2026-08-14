@@ -27,11 +27,74 @@ def _get_ytdlp_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
-        "js_runtimes": {"node": {}},
     }
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
     return opts
+
+
+def _ytdlp_extract_info(url: str, download: bool = False) -> dict:
+    """Extract YouTube info using subprocess to ensure node runtime works."""
+    import subprocess
+    import json as _json
+
+    cmd = [
+        "yt-dlp",
+        "--js-runtimes", "node",
+        "--dump-json",
+        "--no-warnings",
+        "--format", "ba/b",
+    ]
+    if os.path.exists(COOKIES_FILE):
+        cmd.extend(["--cookies", COOKIES_FILE])
+    if url.startswith("ytsearch"):
+        cmd.extend(["--default-search", "ytsearch"])
+    cmd.append(url)
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise Exception(result.stderr.strip() or "yt-dlp failed")
+    return _json.loads(result.stdout)
+
+
+def _ytdlp_search(query: str, limit: int = 5) -> list:
+    """Search YouTube using subprocess."""
+    import subprocess
+    import json as _json
+
+    cmd = [
+        "yt-dlp",
+        "--js-runtimes", "node",
+        "--dump-json",
+        "--no-warnings",
+        "--flat-playlist",
+        "--default-search", "ytsearch",
+        f"ytsearch{limit}:{query}",
+    ]
+    if os.path.exists(COOKIES_FILE):
+        cmd.extend(["--cookies", COOKIES_FILE])
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise Exception(result.stderr.strip() or "yt-dlp search failed")
+
+    results = []
+    for line in result.stdout.strip().split("\n"):
+        if not line:
+            continue
+        try:
+            e = _json.loads(line)
+            vid = e.get("id") or e.get("url", "")
+            vid_url = f"https://www.youtube.com/watch?v={vid}" if vid and not vid.startswith("http") else vid
+            results.append({
+                "title": e.get("title", "?"),
+                "url": vid_url,
+                "duration": int(e.get("duration") or 0),
+                "thumbnail": e.get("thumbnail", f"https://img.youtube.com/vi/{e.get('id', '0')}/mqdefault.jpg"),
+            })
+        except Exception:
+            pass
+    return results
 
 MUSIC_PREFIX = "!"
 
@@ -1385,11 +1448,8 @@ class BotManager:
             url = np.get("url", "")
             if url and vc:
                 try:
-                    import yt_dlp
-                    opts = _get_ytdlp_opts()
-                    with yt_dlp.YoutubeDL(opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
-                        audio_url = info["url"]
+                    info = _ytdlp_extract_info(url)
+                    audio_url = info["url"]
                     ffopts = {"before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5", "options": "-vn"}
                     ffmpeg_exe = self._ffmpeg_exe()
                     if ffmpeg_exe:
@@ -1431,16 +1491,13 @@ class BotManager:
         channel = next_item.get("channel", "")
 
         try:
-            import yt_dlp
-            opts = _get_ytdlp_opts()
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                audio_url = info["url"]
-                title = info.get("title", title)
-                if not thumbnail:
-                    thumbnail = info.get("thumbnail", "")
-                if not duration:
-                    duration = int(info.get("duration") or 0)
+            info = _ytdlp_extract_info(url)
+            audio_url = info["url"]
+            title = info.get("title", title)
+            if not thumbnail:
+                thumbnail = info.get("thumbnail", "")
+            if not duration:
+                duration = int(info.get("duration") or 0)
 
             ffopts = {"before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5", "options": "-vn"}
             ffmpeg_exe = self._ffmpeg_exe()
@@ -1471,9 +1528,8 @@ class BotManager:
         try:
             import yt_dlp
             source_url = url if (url and url.startswith("http")) else f"ytsearch1:{url}"
-            opts = _get_ytdlp_opts()
             loop = asyncio.get_event_loop()
-            info = await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(opts).extract_info(source_url, download=False))
+            info = await loop.run_in_executor(None, lambda: _ytdlp_extract_info(source_url))
             if not url or not url.startswith("http"):
                 info = info.get("entries", [info])[0] if info.get("entries") else info
             audio_url = info["url"]
@@ -1535,39 +1591,7 @@ class BotManager:
 
     def search_youtube(self, query: str, limit: int = 10) -> tuple[bool, list]:
         try:
-            import yt_dlp
-            opts = {
-                "format": "ba/b",
-                "quiet": True,
-                "no_warnings": True,
-                "extract_flat": True,
-                "default_search": "ytsearch",
-                "js_runtimes": {"node": {}},
-            }
-            if os.path.exists(COOKIES_FILE):
-                opts["cookiefile"] = COOKIES_FILE
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
-            entries = info.get("entries") or []
-            results = []
-            for e in entries:
-                if not e:
-                    continue
-                url = e.get("url") or ""
-                if url and not url.startswith("http"):
-                    url = "https://www.youtube.com/watch?v=" + url
-                if not url:
-                    vid = e.get("id")
-                    if vid:
-                        url = "https://www.youtube.com/watch?v=" + vid
-                if not url:
-                    continue
-                results.append({
-                    "title": e.get("title", "Unknown"),
-                    "url": url,
-                    "duration": int(e.get("duration") or 0),
-                    "uploader": e.get("uploader", ""),
-                })
+            results = _ytdlp_search(query, limit)
             return True, results
         except ImportError:
             return False, "yt-dlp غير مثبت. شغّل: pip install yt-dlp"
@@ -1965,26 +1989,7 @@ bot_manager = BotManager()
 
 def _yt_search(query: str, limit: int = 5) -> list:
     """Fast YouTube search returning title, url, thumbnail, duration."""
-    import yt_dlp
-    opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "default_search": "ytsearch", "js_runtimes": {"node": {}}}
-    if os.path.exists(COOKIES_FILE):
-        opts["cookiefile"] = COOKIES_FILE
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
-    results = []
-    for e in (info.get("entries") or []):
-        if not e:
-            continue
-        vid = e.get("id") or e.get("url", "")
-        url = f"https://www.youtube.com/watch?v={vid}" if vid and not vid.startswith("http") else vid
-        thumb = f"https://img.youtube.com/vi/{e.get('id', '0')}/mqdefault.jpg" if e.get("id") else ""
-        results.append({
-            "title": e.get("title", "?"),
-            "url": url,
-            "duration": int(e.get("duration") or 0),
-            "thumbnail": thumb,
-        })
-    return results
+    return _ytdlp_search(query, limit)
 
 
 async def _yt_search_async(query: str, limit: int = 5) -> list:

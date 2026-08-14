@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+*.pyo
+*.bak
+*.log
+temp/
+ui/
+main.py
+get_ffmpeg.py
+
+# Sensitive files
+config.json
+bin/ffmpeg.exe
+config/bot_token.enc
+config/admin_password.hash
+config/sessions.json
+config/users.json
+config/warns.json
+config/cookies.txt
+web/error.log
+web/audit.log
+web/start_web.bat
+
+# Environment
+.env
+.env.local
+venv/
+.venv/

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NEON Cortex — لوحة تحكم البوت</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>N</text></svg>" />
+<link rel="stylesheet" href="css/style.css?v=10" />
+</head>
+<body>
+
+<!-- ----------- Background FX ----------- -->
+<div class="bg">
+  <img class="bg-photo bg-photo-1" src="assets/bg_main.jpg" alt="" />
+  <img class="bg-photo bg-photo-2" src="assets/bg_city.jpg" alt="" />
+  <canvas id="particles"></canvas>
+  <div class="aurora aurora-1"></div>
+  <div class="aurora aurora-2"></div>
+  <div class="aurora aurora-3"></div>
+  <div class="grid-overlay"></div>
+  <div class="bg-shade"></div>
+</div>
+
+<!-- ----------- Login Overlay ----------- -->
+<div id="loginOverlay" class="login-overlay">
+  <div class="login-card glass neon-frame">
+    <div class="login-banner">
+      <img src="assets/banner.png" alt="banner" />
+      <div class="login-banner-tint"></div>
+    </div>
+    <div class="login-body">
+      <div class="login-logo">
+        <img src="assets/logo.png" alt="logo" />
+      </div>
+      <h1 class="gradient-text neon-title">NEON CORTEX</h1>
+      <p class="login-sub">سجّل الدخول للتحكم ببوتك مباشرة من المتصفح</p>
+
+      <div class="login-token">
+        <label>توكن البوت (Bot Token)</label>
+        <div class="token-input-wrap">
+          <input id="tokenInput" type="password" placeholder="ODAzMDEwNDE4NjEyMg....." autocomplete="off" spellcheck="false" />
+          <button id="toggleToken" class="eye-btn" type="button" title="إظهار/إخفاء">👁</button>
+        </div>
+        <p class="hint">احصل على التوكن من <a href="https://discord.com/developers/applications" target="_blank" style="color:var(--cyan);text-decoration:none">Developer Portal</a> في قسم Bot</p>
+      </div>
+
+      <button id="connectBtn" class="btn btn-primary btn-lg glow-btn w-full">
+        <span class="spinner hidden" id="connectSpinner"></span>
+        <span id="connectBtnText">🔌 تشغيل البوت</span>
+      </button>
+
+      <div id="loginError" class="login-error hidden"></div>
+
+      <div class="login-feats">
+        <span>تحكم سهل</span><span>واجهة عربية</span><span>موسيقى حية</span>
+        <span>إدارة شاملة</span><span>أتمتة ذكية</span><span>آمن ومحمي</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ----------- App Shell ----------- -->
+<div id="app" class="app hidden">
+
+  <!-- Sidebar -->
+  <aside class="sidebar glass">
+    <div class="sidebar-brand">
+      <div class="logo-ring small"><span>🤖</span></div>
+      <div>
+        <div class="brand-name gradient-text">NEON CORTEX</div>
+        <div class="brand-sub">لوحة التحكم</div>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-tab="dashboard">🏠 <span>لوحة التحكم</span></button>
+      <div class="nav-group">الخدمات</div>
+      <button class="nav-item" data-tab="messages">💬 <span>الرسائل</span></button>
+      <button class="nav-item" data-tab="channels">📢 <span>القنوات</span></button>
+      <button class="nav-item" data-tab="members">👥 <span>الأعضاء</span></button>
+      <button class="nav-item" data-tab="music">🎵 <span>الموسيقى</span></button>
+      <div class="nav-group">الإدارة</div>
+      <button class="nav-item" data-tab="roles">🎭 <span>الأدوار</span></button>
+      <button class="nav-item" data-tab="automod">🛡️ <span>الإشراف الآلي</span></button>
+      <button class="nav-item" data-tab="welcome">👋 <span>الترحيب</span></button>
+      <button class="nav-item" data-tab="tickets">🎫 <span>التذاكر</span></button>
+      <div class="nav-group">الأدوات</div>
+      <button class="nav-item" data-tab="polls">📊 <span>الاستطلاعات</span></button>
+      <button class="nav-item" data-tab="automation">⚙️ <span>الأتمتة</span></button>
+      <button class="nav-item" data-tab="emojis">😀 <span>الرموز التعبيرية</span></button>
+      <button class="nav-item" data-tab="soundboard">🔊 <span>لوحة الصوت</span></button>
+      <button class="nav-item" data-tab="structure">🏗️ <span>الهيكل والنسخ</span></button>
+      <button class="nav-item" data-tab="dmail">📨 <span>الإرسال الجماعي</span></button>
+      <button class="nav-item" data-tab="search">🔍 <span>بحث الموحد</span></button>
+      <button class="nav-item" data-tab="audit">📋 <span>سجل التغييرات</span></button>
+      <button class="nav-item" data-tab="tools">🧰 <span>الأدوات</span></button>
+      <a href="cookies.html" class="nav-item" target="_blank">🍪 <span>YouTube Cookies</span></a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="mini-status">
+        <span class="status-dot" id="sideDot"></span>
+        <span id="sideStatus">غير متصل</span>
+      </div>
+      <button class="btn btn-ghost w-full" id="disconnectBtn">⏻ قطع الاتصال</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar glass">
+      <div class="topbar-right">
+        <button class="hamburger" id="hamburger">☰</button>
+        <h2 id="pageTitle">لوحة التحكم</h2>
+      </div>
+      <div class="topbar-left">
+        <button class="btn btn-ghost btn-sm" id="themeToggle" title="تبديل الوضع">🌙</button>
+        <div class="bot-pill" id="botPill">
+          <span class="status-dot" id="headDot"></span>
+          <span id="botName">غير متصل</span>
+        </div>
+        <div class="guild-select-wrap">
+          <select id="guildSelect" class="guild-select" title="اختر السيرفر"></select>
+        </div>
+        <button class="btn btn-ghost" id="refreshBtn" title="تحديث">⟳</button>
+      </div>
+    </header>
+
+    <div id="view" class="view"></div>
+  </main>
+</div>
+
+<!-- ----------- Toasts ----------- -->
+<div id="toastWrap" class="toast-wrap"></div>
+
+<!-- ----------- Modal ----------- -->
+<div id="modalWrap" class="modal-wrap hidden">
+  <div class="modal glass neon-frame" id="modalBox"></div>
+</div>
+
+<script src="js/api.js?v=10"></script>
+<script src="js/views.js?v=10"></script>
+<script src="js/main.js?v=10"></script>
+</body>
+</html>

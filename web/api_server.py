@@ -1982,6 +1982,831 @@ async def send_embed(guild_id: int, body: EmbedSendIn):
     return {"ok": False, "error": "failed to send embed"}
 
 
+# ── Guild Config Storage ────────────────────────────────────────────
+
+GUILD_CONFIGS_DIR = os.path.join(CONFIG_DIR, "guild_configs")
+os.makedirs(GUILD_CONFIGS_DIR, exist_ok=True)
+
+def _guild_config_path(guild_id: int, feature: str) -> str:
+    return os.path.join(GUILD_CONFIGS_DIR, f"{guild_id}_{feature}.json")
+
+def _load_guild_config(guild_id: int, feature: str, default=None) -> dict:
+    path = _guild_config_path(guild_id, feature)
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return default if default is not None else {}
+
+def _save_guild_config(guild_id: int, feature: str, data: dict):
+    path = _guild_config_path(guild_id, feature)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+# ── Tracking Helpers ────────────────────────────────────────────────
+
+_api_rate_stats = {"total_requests": 0, "by_endpoint": {}, "errors": 0, "start_time": datetime.now().isoformat()}
+
+_command_stats_file = os.path.join(CONFIG_DIR, "command_stats.json")
+
+def _load_command_stats() -> dict:
+    if os.path.exists(_command_stats_file):
+        with open(_command_stats_file, "r") as f:
+            return json.load(f)
+    return {}
+
+def _save_command_stats(stats: dict):
+    with open(_command_stats_file, "w") as f:
+        json.dump(stats, f, indent=2)
+
+def _track_command(command: str):
+    stats = _load_command_stats()
+    stats[command] = stats.get(command, 0) + 1
+    _save_command_stats(stats)
+
+_errors_file = os.path.join(CONFIG_DIR, "errors.json")
+
+def _load_errors() -> list:
+    if os.path.exists(_errors_file):
+        with open(_errors_file, "r") as f:
+            return json.load(f)
+    return []
+
+def _save_errors(errors: list):
+    with open(_errors_file, "w") as f:
+        json.dump(errors[-200:], f, indent=2)
+
+def _track_error(endpoint: str, error: str):
+    errors = _load_errors()
+    errors.append({"time": datetime.now().isoformat(), "endpoint": endpoint, "error": error})
+    _save_errors(errors)
+
+
+# ── New API Schemas ─────────────────────────────────────────────────
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+class AntiNukeIn(BaseModel):
+    enabled: bool = False
+    max_bans: int = 5
+    max_kicks: int = 5
+    max_channel_deletes: int = 3
+    max_role_deletes: int = 3
+    max_message_spam: int = 10
+    log_channel_id: int = 0
+    action: str = "ban"
+
+class VerificationIn(BaseModel):
+    enabled: bool = False
+    channel_id: int = 0
+    role_id: int = 0
+    message: str = "React to verify!"
+    log_channel_id: int = 0
+
+class VerificationSendIn(BaseModel):
+    channel_id: int
+
+class ReactionRoleSetupIn(BaseModel):
+    channel_id: int
+    message_id: int
+    roles: list[dict] = []
+
+class GiveawayCreateIn(BaseModel):
+    channel_id: int
+    prize: str
+    winners_count: int = 1
+    duration_hours: float = 24
+
+class LevelConfigIn(BaseModel):
+    enabled: bool = False
+    xp_per_message: int = 15
+    xp_cooldown: int = 60
+    level_up_channel: int = 0
+    level_up_message: str = "GG {user}, you leveled up to level {level}!"
+    double_xp_roles: list[int] = []
+
+class CustomCommandIn(BaseModel):
+    name: str
+    response: str
+    type: str = "text"
+
+class BirthdayIn(BaseModel):
+    user_id: int
+    month: int
+    day: int
+
+class SuggestionConfigIn(BaseModel):
+    enabled: bool = False
+    channel_id: int = 0
+    log_channel_id: int = 0
+    up_emoji: str = "👍"
+    down_emoji: str = "👎"
+
+class WebhookCreateIn(BaseModel):
+    channel_id: int
+    name: str = "Bot Webhook"
+
+class ScheduledGuildIn(BaseModel):
+    channel_id: int
+    message: str
+    time: str
+    repeat: str = "daily"
+
+class AnnounceIn(BaseModel):
+    message: str
+    guild_ids: list[int] = []
+
+
+# ── 1. Admin Auth (new routes) ─────────────────────────────────────
+
+@app.post("/api/auth/login")
+def auth_login(body: LoginIn):
+    users = _load_users()
+    user_data = users.get(body.username)
+    if not user_data:
+        _log_audit("login_failed", body.username, "مستخدم غير موجود")
+        raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
+    if not _verify_password(body.password, user_data["password"]):
+        _log_audit("login_failed", body.username, "كلمة مرور خاطئة")
+        raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
+    session_id = _generate_session()
+    _log_audit("login_success", body.username, "تسجيل دخول ناجح")
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "username": body.username,
+        "permissions": user_data.get("permissions", []),
+    }
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    auth_header = request.headers.get("authorization", "")
+    session_id = auth_header.replace("Bearer ", "") if auth_header else ""
+    if not _is_valid_session(session_id):
+        raise HTTPException(status_code=401, detail="غير مصرح")
+    users = _load_users()
+    for username, user_data in users.items():
+        return {"ok": True, "username": username, "permissions": user_data.get("permissions", []), "role": user_data.get("role", "user")}
+    return {"ok": True, "username": "admin", "permissions": ["all"], "role": "admin"}
+
+
+# ── 2. Anti-Nuke ────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/antinuke")
+def get_antinuke(guild_id: int):
+    require_connected()
+    config = _load_guild_config(guild_id, "antinuke", {
+        "enabled": False, "max_bans": 5, "max_kicks": 5,
+        "max_channel_deletes": 3, "max_role_deletes": 3,
+        "max_message_spam": 10, "log_channel_id": 0, "action": "ban",
+    })
+    return {"ok": True, "config": config}
+
+
+@app.post("/api/guilds/{guild_id}/antinuke")
+def set_antinuke(guild_id: int, body: AntiNukeIn):
+    require_connected()
+    config = body.dict()
+    _save_guild_config(guild_id, "antinuke", config)
+    _log_audit("antinuke_updated", "admin", f"تحديث Anti-Nuke للسيرفر {guild_id}")
+    return {"ok": True, "message": "تم حفظ إعدادات Anti-Nuke", "config": config}
+
+
+# ── 3. Verification ─────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/verification")
+def get_verification(guild_id: int):
+    config = _load_guild_config(guild_id, "verification", {
+        "enabled": False, "channel_id": 0, "role_id": 0,
+        "message": "React to verify!", "log_channel_id": 0,
+    })
+    return {"ok": True, "config": config}
+
+
+@app.post("/api/guilds/{guild_id}/verification")
+def set_verification(guild_id: int, body: VerificationIn):
+    config = body.dict()
+    _save_guild_config(guild_id, "verification", config)
+    _log_audit("verification_updated", "admin", f"تحديث التحقق للسيرفر {guild_id}")
+    return {"ok": True, "message": "تم حفظ إعدادات التحقق", "config": config}
+
+
+@app.post("/api/guilds/{guild_id}/verification/send")
+def send_verification_panel(guild_id: int, body: VerificationSendIn):
+    require_connected()
+    config = _load_guild_config(guild_id, "verification")
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="التحقق غير مفعّل")
+
+    async def _send():
+        channel = bot_manager.client.get_channel(body.channel_id)
+        if not channel:
+            return False, "قناة غير موجودة"
+        import discord as _d
+        embed = _d.Embed(
+            title="Verification",
+            description=config.get("message", "React to verify!"),
+            color=0x5865F2,
+        )
+        msg = await channel.send(embed=embed)
+        await msg.add_reaction("✅")
+        return True, "تم إرسال لوحة التحقق"
+
+    ok, msg = bot_manager.run_coro(_send())
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    _log_audit("verification_panel_sent", "admin", f"إرسال لوحة التحقق في السيرفر {guild_id}")
+    return {"ok": True, "message": msg}
+
+
+# ── 4. Reaction Roles ───────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/reaction-roles")
+def get_reaction_roles(guild_id: int):
+    config = _load_guild_config(guild_id, "reaction_roles", {"entries": []})
+    return {"ok": True, "config": config}
+
+
+@app.post("/api/guilds/{guild_id}/reaction-roles/setup")
+def setup_reaction_roles(guild_id: int, body: ReactionRoleSetupIn):
+    require_connected()
+    config = _load_guild_config(guild_id, "reaction_roles", {"entries": []})
+    entry = {
+        "channel_id": body.channel_id,
+        "message_id": body.message_id,
+        "roles": body.roles,
+        "created_at": datetime.now().isoformat(),
+    }
+    config["entries"].append(entry)
+    _save_guild_config(guild_id, "reaction_roles", config)
+    _log_audit("reaction_roles_setup", "admin", f"إعداد Reaction Roles في السيرفر {guild_id}")
+    return {"ok": True, "message": "تم إعداد Reaction Roles"}
+
+
+@app.delete("/api/guilds/{guild_id}/reaction-roles")
+def remove_reaction_roles(guild_id: int):
+    _save_guild_config(guild_id, "reaction_roles", {"entries": []})
+    _log_audit("reaction_roles_removed", "admin", f"إزالة Reaction Roles من السيرفر {guild_id}")
+    return {"ok": True, "message": "تم إزالة Reaction Roles"}
+
+
+# ── 5. Giveaways ────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/giveaways")
+def list_giveaways(guild_id: int):
+    config = _load_guild_config(guild_id, "giveaways", {"active": []})
+    return {"ok": True, "giveaways": config.get("active", [])}
+
+
+@app.post("/api/guilds/{guild_id}/giveaways/create")
+def create_giveaway(guild_id: int, body: GiveawayCreateIn):
+    require_connected()
+    config = _load_guild_config(guild_id, "giveaways", {"active": []})
+    giveaway_id = secrets.token_hex(8)
+    giveaway = {
+        "id": giveaway_id,
+        "channel_id": body.channel_id,
+        "prize": body.prize,
+        "winners_count": body.winners_count,
+        "duration_hours": body.duration_hours,
+        "created_at": datetime.now().isoformat(),
+        "ends_at": (datetime.now() + timedelta(hours=body.duration_hours)).isoformat(),
+        "ended": False,
+    }
+    config["active"].append(giveaway)
+    _save_guild_config(guild_id, "giveaways", config)
+    _log_audit("giveaway_created", "admin", f"إنشاء جيفواي: {body.prize} في السيرفر {guild_id}")
+    return {"ok": True, "message": "تم إنشاء الجيفواي", "giveaway_id": giveaway_id}
+
+
+@app.post("/api/guilds/{guild_id}/giveaways/{giveaway_id}/end")
+def end_giveaway(guild_id: int, giveaway_id: str):
+    config = _load_guild_config(guild_id, "giveaways", {"active": []})
+    for g in config.get("active", []):
+        if g["id"] == giveaway_id:
+            g["ended"] = True
+            g["ended_at"] = datetime.now().isoformat()
+            _save_guild_config(guild_id, "giveaways", config)
+            _log_audit("giveaway_ended", "admin", f"إنهاء جيفواي {giveaway_id} في السيرفر {guild_id}")
+            return {"ok": True, "message": "تم إنهاء الجيفواي"}
+    raise HTTPException(status_code=404, detail="الجيفواي غير موجود")
+
+
+# ── 6. Level System ─────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/levels")
+def get_levels_config(guild_id: int):
+    config = _load_guild_config(guild_id, "levels", {
+        "enabled": False, "xp_per_message": 15, "xp_cooldown": 60,
+        "level_up_channel": 0, "level_up_message": "GG {user}, you leveled up to level {level}!",
+        "double_xp_roles": [],
+    })
+    return {"ok": True, "config": config}
+
+
+@app.post("/api/guilds/{guild_id}/levels")
+def set_levels_config(guild_id: int, body: LevelConfigIn):
+    config = body.dict()
+    _save_guild_config(guild_id, "levels", config)
+    _log_audit("levels_updated", "admin", f"تحديث نظام المستوى للسيرفر {guild_id}")
+    return {"ok": True, "message": "تم حفظ إعدادات نظام المستوى", "config": config}
+
+
+@app.get("/api/guilds/{guild_id}/levels/leaderboard")
+def get_levels_leaderboard(guild_id: int):
+    config = _load_guild_config(guild_id, "levels", {})
+    users = config.get("users", {})
+    sorted_users = sorted(users.items(), key=lambda x: x[1].get("xp", 0), reverse=True)[:10]
+    leaderboard = [{"user_id": uid, **data} for uid, data in sorted_users]
+    return {"ok": True, "leaderboard": leaderboard}
+
+
+@app.get("/api/guilds/{guild_id}/levels/{user_id}")
+def get_user_level(guild_id: int, user_id: int):
+    config = _load_guild_config(guild_id, "levels", {})
+    users = config.get("users", {})
+    user_data = users.get(str(user_id), {"xp": 0, "level": 0, "messages": 0})
+    return {"ok": True, "user_id": user_id, **user_data}
+
+
+# ── 7. Custom Commands ──────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/commands")
+def list_custom_commands(guild_id: int):
+    config = _load_guild_config(guild_id, "commands", {"commands": []})
+    return {"ok": True, "commands": config.get("commands", [])}
+
+
+@app.post("/api/guilds/{guild_id}/commands")
+def create_custom_command(guild_id: int, body: CustomCommandIn):
+    config = _load_guild_config(guild_id, "commands", {"commands": []})
+    for cmd in config["commands"]:
+        if cmd["name"] == body.name:
+            raise HTTPException(status_code=400, detail="الأمر موجود مسبقاً")
+    config["commands"].append({"name": body.name, "response": body.response, "type": body.type})
+    _save_guild_config(guild_id, "commands", config)
+    _log_audit("command_created", "admin", f"إنشاء أمر مخصص: {body.name} في السيرفر {guild_id}")
+    return {"ok": True, "message": f"تم إنشاء الأمر {body.name}"}
+
+
+@app.delete("/api/guilds/{guild_id}/commands/{name}")
+def delete_custom_command(guild_id: int, name: str):
+    config = _load_guild_config(guild_id, "commands", {"commands": []})
+    config["commands"] = [c for c in config["commands"] if c["name"] != name]
+    _save_guild_config(guild_id, "commands", config)
+    _log_audit("command_deleted", "admin", f"حذف أمر مخصص: {name} من السيرفر {guild_id}")
+    return {"ok": True, "message": f"تم حذف الأمر {name}"}
+
+
+# ── 8. Birthday ─────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/birthdays")
+def list_birthdays(guild_id: int):
+    config = _load_guild_config(guild_id, "birthdays", {"birthdays": []})
+    return {"ok": True, "birthdays": config.get("birthdays", [])}
+
+
+@app.post("/api/guilds/{guild_id}/birthdays")
+def set_birthday(guild_id: int, body: BirthdayIn):
+    config = _load_guild_config(guild_id, "birthdays", {"birthdays": []})
+    config["birthdays"] = [b for b in config["birthdays"] if b["user_id"] != body.user_id]
+    config["birthdays"].append({"user_id": body.user_id, "month": body.month, "day": body.day})
+    _save_guild_config(guild_id, "birthdays", config)
+    _log_audit("birthday_set", "admin", f"ضبط عيد ميلاد للمستخدم {body.user_id} في السيرفر {guild_id}")
+    return {"ok": True, "message": "تم ضبط تاريخ الميلاد"}
+
+
+@app.delete("/api/guilds/{guild_id}/birthdays/{user_id}")
+def remove_birthday(guild_id: int, user_id: int):
+    config = _load_guild_config(guild_id, "birthdays", {"birthdays": []})
+    config["birthdays"] = [b for b in config["birthdays"] if b["user_id"] != user_id]
+    _save_guild_config(guild_id, "birthdays", config)
+    _log_audit("birthday_removed", "admin", f"إزالة عيد ميلاد للمستخدم {user_id} من السيرفر {guild_id}")
+    return {"ok": True, "message": "تم إزالة تاريخ الميلاد"}
+
+
+# ── 9. AFK ──────────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/afk")
+def list_afk_users(guild_id: int):
+    config = _load_guild_config(guild_id, "afk", {"users": {}})
+    users = config.get("users", {})
+    afk_list = [{"user_id": uid, **data} for uid, data in users.items()]
+    return {"ok": True, "afk_users": afk_list}
+
+
+# ── 10. Suggestions ─────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/suggestions")
+def get_suggestion_config(guild_id: int):
+    config = _load_guild_config(guild_id, "suggestions", {
+        "enabled": False, "channel_id": 0, "log_channel_id": 0,
+        "up_emoji": "👍", "down_emoji": "👎",
+    })
+    return {"ok": True, "config": config}
+
+
+@app.post("/api/guilds/{guild_id}/suggestions")
+def set_suggestion_config(guild_id: int, body: SuggestionConfigIn):
+    config = body.dict()
+    _save_guild_config(guild_id, "suggestions", config)
+    _log_audit("suggestions_updated", "admin", f"تحديث اقتراحات السيرفر {guild_id}")
+    return {"ok": True, "message": "تم حفظ إعدادات الاقتراحات", "config": config}
+
+
+# ── 11. Music Enhanced ──────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/music/queue-display")
+def music_queue_display(guild_id: int):
+    status = bot_manager.get_music_status(guild_id)
+    queue = status.get("queue", [])
+    now_playing = status.get("now_playing", None)
+    return {"ok": True, "now_playing": now_playing, "queue": queue, "total": len(queue)}
+
+
+@app.get("/api/guilds/{guild_id}/music/stats")
+def music_stats(guild_id: int):
+    config = _load_guild_config(guild_id, "music_stats", {
+        "total_played": 0, "total_requests": 0, "top_songs": [], "top_requesters": [],
+    })
+    return {"ok": True, "stats": config}
+
+
+@app.get("/api/guilds/{guild_id}/music/now-playing")
+def music_now_playing(guild_id: int):
+    status = bot_manager.get_music_status(guild_id)
+    return {"ok": True, "now_playing": status.get("now_playing"), "position": status.get("position", 0)}
+
+
+@app.get("/api/guilds/{guild_id}/music/lyrics")
+def music_lyrics(guild_id: int, q: str = ""):
+    if not q:
+        raise HTTPException(status_code=400, detail="حدد اسم الأغنية للبحث")
+    try:
+        import urllib.request
+        import urllib.parse
+        url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(q)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "NeonCortex/2.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            return {"ok": True, "lyrics": data.get("lyrics", "لم يتم العثور على كلمات"), "title": q}
+    except Exception:
+        return {"ok": False, "error": "لم يتم العثور على كلمات للأغنية", "query": q}
+
+
+# ── 12. Webhooks ────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/webhooks")
+def list_webhooks(guild_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+
+    async def _get():
+        webhooks = await guild.webhooks()
+        return [{"id": str(w.id), "name": w.name, "channel_id": str(w.channel_id), "url": w.url} for w in webhooks]
+
+    hooks = bot_manager.run_coro(_get())
+    return {"ok": True, "webhooks": hooks}
+
+
+@app.post("/api/guilds/{guild_id}/webhooks")
+def create_webhook(guild_id: int, body: WebhookCreateIn):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+
+    async def _create():
+        channel = guild.get_channel(body.channel_id)
+        if not channel:
+            return False, "قناة غير موجودة", None
+        webhook = await guild.create_webhook(name=body.name, channel=channel)
+        return True, "تم إنشاء الـ Webhook", {"id": str(webhook.id), "name": webhook.name, "url": webhook.url}
+
+    ok, msg, data = bot_manager.run_coro(_create())
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    _log_audit("webhook_created", "admin", f"إنشاء Webhook: {body.name} في السيرفر {guild_id}")
+    return {"ok": True, "message": msg, "webhook": data}
+
+
+@app.delete("/api/guilds/{guild_id}/webhooks/{webhook_id}")
+def delete_webhook(guild_id: int, webhook_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+
+    async def _delete():
+        webhooks = await guild.webhooks()
+        for w in webhooks:
+            if w.id == webhook_id:
+                await w.delete()
+                return True, "تم حذف الـ Webhook"
+        return False, "الـ Webhook غير موجود"
+
+    ok, msg = bot_manager.run_coro(_delete())
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    _log_audit("webhook_deleted", "admin", f"حذف Webhook {webhook_id} من السيرفر {guild_id}")
+    return {"ok": True, "message": msg}
+
+
+# ── 13. Emojis Delete ───────────────────────────────────────────────
+
+@app.delete("/api/guilds/{guild_id}/emojis/{emoji_id}")
+def delete_emoji(guild_id: int, emoji_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    emoji = discord.utils.get(guild.emojis, id=emoji_id)
+    if not emoji:
+        raise HTTPException(status_code=404, detail="الإيموجي غير موجود")
+    try:
+        name = emoji.name
+        bot_manager.run_coro(emoji.delete())
+        _log_audit("emoji_deleted", "admin", f"حذف إيموجي: {name} من السيرفر {guild_id}")
+        return {"ok": True, "message": f"تم حذف الإيموجي {name}"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── 14. Roles Hierarchy ─────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/roles/hierarchy")
+def get_roles_hierarchy(guild_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    roles = sorted(guild.roles, key=lambda r: r.position, reverse=True)
+    hierarchy = []
+    for r in roles:
+        hierarchy.append({
+            "id": str(r.id),
+            "name": r.name,
+            "position": r.position,
+            "color": str(r.color),
+            "member_count": len(r.members),
+            "managed": r.managed,
+            "is_default": r.is_default(),
+        })
+    return {"ok": True, "hierarchy": hierarchy, "total": len(hierarchy)}
+
+
+# ── 15. Invites ─────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/invites")
+def list_invites(guild_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+
+    async def _get():
+        invites = await guild.invites()
+        return [{
+            "code": inv.code,
+            "uses": inv.uses,
+            "max_uses": inv.max_uses,
+            "created_at": inv.created_at.isoformat() if inv.created_at else "",
+            "inviter": str(inv.inviter) if inv.inviter else "",
+            "channel": str(inv.channel) if inv.channel else "",
+        } for inv in invites]
+
+    data = bot_manager.run_coro(_get())
+    return {"ok": True, "invites": data}
+
+
+@app.get("/api/guilds/{guild_id}/invites/stats")
+def invite_stats(guild_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+
+    async def _get():
+        invites = await guild.invites()
+        stats = {}
+        for inv in invites:
+            inviter = str(inv.inviter) if inv.inviter else "Unknown"
+            if inviter not in stats:
+                stats[inviter] = {"invites": 0, "uses": 0}
+            stats[inviter]["invites"] += 1
+            stats[inviter]["uses"] += inv.uses
+        sorted_stats = sorted(stats.items(), key=lambda x: x[1]["uses"], reverse=True)
+        return [{"inviter": name, **data} for name, data in sorted_stats]
+
+    data = bot_manager.run_coro(_get())
+    return {"ok": True, "leaderboard": data}
+
+
+# ── 16. Voice ───────────────────────────────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/voice/connected")
+def voice_connected(guild_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    connected = []
+    for m in guild.members:
+        if m.voice and m.voice.channel:
+            connected.append({
+                "user_id": str(m.id),
+                "name": str(m),
+                "channel_id": str(m.voice.channel.id),
+                "channel_name": m.voice.channel.name,
+                "self_mute": m.voice.self_mute,
+                "self_deaf": m.voice.self_deaf,
+            })
+    return {"ok": True, "connected": connected, "total": len(connected)}
+
+
+@app.get("/api/guilds/{guild_id}/voice/stats")
+def voice_stats(guild_id: int):
+    require_connected()
+    guild = _get_guild(guild_id)
+    if not guild:
+        raise HTTPException(status_code=404, detail="سيرفر غير موجود")
+    voice_channels = [ch for ch in guild.channels if isinstance(ch, discord.VoiceChannel)]
+    total_connected = sum(len(ch.members) for ch in voice_channels)
+    channel_stats = [{"id": str(ch.id), "name": ch.name, "members": len(ch.members)} for ch in voice_channels]
+    return {"ok": True, "total_connected": total_connected, "channels": channel_stats}
+
+
+# ── 17. Bot Status ──────────────────────────────────────────────────
+
+@app.get("/api/bot/status")
+def bot_status_public():
+    uptime_seconds = 0
+    if bot_manager.ready and bot_manager.client and hasattr(bot_manager.client, 'uptime') and bot_manager.client.uptime:
+        try:
+            uptime_seconds = (datetime.utcnow() - bot_manager.client.uptime).total_seconds()
+        except Exception:
+            pass
+    total_members = sum(g.member_count or 0 for g in bot_manager.guilds)
+    return {
+        "ok": True,
+        "connected": bot_manager.ready,
+        "user": str(bot_manager.user) if bot_manager.user else None,
+        "guilds_count": len(bot_manager.guilds),
+        "total_members": total_members,
+        "latency": round(bot_manager.client.latency, 2) if bot_manager.ready and bot_manager.client else 0,
+        "uptime": int(uptime_seconds),
+        "version": "2.0.0",
+    }
+
+
+# ── 18. Command Stats ───────────────────────────────────────────────
+
+@app.get("/api/stats/commands")
+def get_command_stats():
+    stats = _load_command_stats()
+    sorted_stats = sorted(stats.items(), key=lambda x: x[1], reverse=True)
+    return {"ok": True, "commands": [{"command": cmd, "uses": count} for cmd, count in sorted_stats[:50]]}
+
+
+# ── 19. Errors ──────────────────────────────────────────────────────
+
+@app.get("/api/errors")
+def get_errors(limit: int = 100):
+    errors = _load_errors()
+    return {"ok": True, "errors": errors[-limit:]}
+
+
+@app.delete("/api/errors")
+def clear_errors():
+    _save_errors([])
+    _log_audit("errors_cleared", "admin", "مسح سجلات الأخطاء")
+    return {"ok": True, "message": "تم مسح الأخطاء"}
+
+
+# ── 20. Performance ─────────────────────────────────────────────────
+
+@app.get("/api/performance")
+def get_performance():
+    try:
+        import psutil
+        cpu = psutil.cpu_percent(interval=0.1)
+        _ram = psutil.virtual_memory()
+        ram_percent = _ram.percent
+        ram_used_mb = round(_ram.used / (1024 * 1024), 1)
+        ram_total_mb = round(_ram.total / (1024 * 1024), 1)
+        disk = psutil.disk_usage("/")
+        disk_percent = disk.percent
+    except Exception:
+        cpu = 0
+        ram_percent = 0
+        ram_used_mb = 0
+        ram_total_mb = 0
+        disk_percent = 0
+    uptime_seconds = 0
+    if bot_manager.ready and bot_manager.client and hasattr(bot_manager.client, 'uptime') and bot_manager.client.uptime:
+        try:
+            uptime_seconds = (datetime.utcnow() - bot_manager.client.uptime).total_seconds()
+        except Exception:
+            pass
+    return {
+        "ok": True,
+        "cpu_percent": cpu,
+        "ram_percent": ram_percent,
+        "ram_used_mb": ram_used_mb,
+        "ram_total_mb": ram_total_mb,
+        "disk_percent": disk_percent,
+        "uptime": int(uptime_seconds),
+        "guilds_count": len(bot_manager.guilds),
+        "ready": bot_manager.ready,
+    }
+
+
+# ── 21. Scheduled Messages (Per-Guild) ──────────────────────────────
+
+@app.get("/api/guilds/{guild_id}/scheduled")
+def get_guild_scheduled(guild_id: int):
+    config = _load_guild_config(guild_id, "scheduled", {"messages": []})
+    return {"ok": True, "scheduled": config.get("messages", [])}
+
+
+@app.post("/api/guilds/{guild_id}/scheduled")
+def add_guild_scheduled(guild_id: int, body: ScheduledGuildIn):
+    config = _load_guild_config(guild_id, "scheduled", {"messages": []})
+    entry = {
+        "channel_id": body.channel_id,
+        "message": body.message,
+        "time": body.time,
+        "repeat": body.repeat,
+        "created_at": datetime.now().isoformat(),
+    }
+    config["messages"].append(entry)
+    _save_guild_config(guild_id, "scheduled", config)
+    _log_audit("scheduled_added", "admin", f"إضافة رسالة مجدولة للسيرفر {guild_id}")
+    return {"ok": True, "message": "تم إضافة الرسالة المجدولة"}
+
+
+@app.delete("/api/guilds/{guild_id}/scheduled/{index}")
+def remove_guild_scheduled(guild_id: int, index: int):
+    config = _load_guild_config(guild_id, "scheduled", {"messages": []})
+    messages = config.get("messages", [])
+    if index < 0 or index >= len(messages):
+        raise HTTPException(status_code=404, detail="الرسالة المجدولة غير موجودة")
+    messages.pop(index)
+    config["messages"] = messages
+    _save_guild_config(guild_id, "scheduled", config)
+    _log_audit("scheduled_removed", "admin", f"إزالة رسالة مجدولة من السيرفر {guild_id}")
+    return {"ok": True, "message": "تم إزالة الرسالة المجدولة"}
+
+
+# ── 22. Cross-Server Announcement ───────────────────────────────────
+
+@app.post("/api/announce")
+def cross_server_announce(body: AnnounceIn):
+    require_connected()
+    if not body.guild_ids:
+        guild_ids = [g.id for g in bot_manager.guilds]
+    else:
+        guild_ids = body.guild_ids
+
+    sent = 0
+    failed = 0
+    errors = []
+    for gid in guild_ids:
+        try:
+            guild = _get_guild(gid)
+            if not guild:
+                failed += 1
+                continue
+            system_channel = guild.system_channel
+            if not system_channel:
+                text_channels = [ch for ch in guild.text_channels if ch.permissions_for(guild.me).send_messages]
+                system_channel = text_channels[0] if text_channels else None
+            if not system_channel:
+                failed += 1
+                errors.append(f"{guild.name}: no writable channel")
+                continue
+            bot_manager.run_coro(system_channel.send(body.message))
+            sent += 1
+        except Exception as e:
+            failed += 1
+            errors.append(f"{gid}: {str(e)[:50]}")
+
+    _log_audit("cross_announce", "admin", f"إرسال إعلان لـ {sent} سيرفر")
+    return {"ok": sent > 0, "sent": sent, "failed": failed, "errors": errors}
+
+
+# ── 23. API Rate Stats ─────────────────────────────────────────────
+
+@app.get("/api/stats/api-rate")
+def get_api_rate():
+    return {"ok": True, "stats": _api_rate_stats}
+
+
 @app.get("/")
 def root():
     from fastapi.responses import RedirectResponse

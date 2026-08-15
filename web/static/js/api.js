@@ -150,5 +150,101 @@ const API = (() => {
     addUser: (user) => request("POST", "/api/admin/users", user),
     deleteUser: (username) => request("DELETE", `/api/admin/users/${username}`),
     updatePermissions: (username, perms) => request("PUT", `/api/admin/users/${username}/permissions`, { permissions: perms }),
+
+    // Admin Auth
+    login: (username, password) => request("POST", "/api/auth/login", { username, password }),
+    logout: () => request("POST", "/api/auth/logout"),
+    authMe: () => request("GET", "/api/auth/me"),
+
+    // Anti-Nuke
+    getAntinuke: (gid) => request("GET", `/api/guilds/${gid}/antinuke`),
+    setAntinuke: (gid, cfg) => request("POST", `/api/guilds/${gid}/antinuke`, cfg),
+
+    // Verification
+    getVerification: (gid) => request("GET", `/api/guilds/${gid}/verification`),
+    setVerification: (gid, cfg) => request("POST", `/api/guilds/${gid}/verification`, cfg),
+    sendVerification: (gid, cfg) => request("POST", `/api/guilds/${gid}/verification/send`, cfg),
+
+    // Reaction Roles
+    getReactionRoles: (gid) => request("GET", `/api/guilds/${gid}/reaction-roles`),
+    setupReactionRoles: (gid, cfg) => request("POST", `/api/guilds/${gid}/reaction-roles/setup`, cfg),
+    removeReactionRoles: (gid) => request("DELETE", `/api/guilds/${gid}/reaction-roles`),
+
+    // Giveaways
+    getGiveaways: (gid) => request("GET", `/api/guilds/${gid}/giveaways`),
+    createGiveaway: (gid, cfg) => request("POST", `/api/guilds/${gid}/giveaways/create`, cfg),
+    endGiveaway: (gid, gwid) => request("POST", `/api/guilds/${gid}/giveaways/${gwid}/end`),
+
+    // Levels
+    getLevels: (gid) => request("GET", `/api/guilds/${gid}/levels`),
+    setLevels: (gid, cfg) => request("POST", `/api/guilds/${gid}/levels`, cfg),
+    getLeaderboard: (gid) => request("GET", `/api/guilds/${gid}/levels/leaderboard`),
+
+    // Custom Commands
+    getCommands: (gid) => request("GET", `/api/guilds/${gid}/commands`),
+    createCommand: (gid, cmd) => request("POST", `/api/guilds/${gid}/commands`, cmd),
+    deleteCommand: (gid, name) => request("DELETE", `/api/guilds/${gid}/commands/${name}`),
+
+    // Birthday
+    getBirthdays: (gid) => request("GET", `/api/guilds/${gid}/birthdays`),
+    setBirthday: (gid, data) => request("POST", `/api/guilds/${gid}/birthdays`, data),
+    deleteBirthday: (gid, uid) => request("DELETE", `/api/guilds/${gid}/birthdays/${uid}`),
+
+    // AFK
+    getAfk: (gid) => request("GET", `/api/guilds/${gid}/afk`),
+
+    // Suggestions
+    getSuggestions: (gid) => request("GET", `/api/guilds/${gid}/suggestions`),
+    setSuggestions: (gid, cfg) => request("POST", `/api/guilds/${gid}/suggestions`, cfg),
+
+    // Music Enhanced
+    getQueueDisplay: (gid) => request("GET", `/api/guilds/${gid}/music/queue-display`),
+    getMusicStats: (gid) => request("GET", `/api/guilds/${gid}/music/stats`),
+    getNowPlaying: (gid) => request("GET", `/api/guilds/${gid}/music/now-playing`),
+    searchLyrics: (gid, q) => request("GET", `/api/guilds/${gid}/music/lyrics?q=${encodeURIComponent(q)}`),
+
+    // Webhooks
+    getWebhooks: (gid) => request("GET", `/api/guilds/${gid}/webhooks`),
+    createWebhook: (gid, data) => request("POST", `/api/guilds/${gid}/webhooks`, data),
+    deleteWebhook: (gid, wid) => request("DELETE", `/api/guilds/${gid}/webhooks/${wid}`),
+
+    // Emojis
+    getEmojis: (gid) => request("GET", `/api/guilds/${gid}/emojis`),
+    deleteEmoji: (gid, eid) => request("DELETE", `/api/guilds/${gid}/emojis/${eid}`),
+
+    // Role Hierarchy
+    getRoleHierarchy: (gid) => request("GET", `/api/guilds/${gid}/roles/hierarchy`),
+
+    // Invites
+    getInvites: (gid) => request("GET", `/api/guilds/${gid}/invites`),
+    getInviteStats: (gid) => request("GET", `/api/guilds/${gid}/invites/stats`),
+
+    // Voice
+    getVoiceConnected: (gid) => request("GET", `/api/guilds/${gid}/voice/connected`),
+    getVoiceStats: (gid) => request("GET", `/api/guilds/${gid}/voice/stats`),
+
+    // Bot Status
+    getBotStatus: () => request("GET", "/api/bot/status"),
+
+    // Stats
+    getCommandStats: () => request("GET", "/api/stats/commands"),
+
+    // Errors
+    getErrors: () => request("GET", "/api/errors"),
+    clearErrors: () => request("DELETE", "/api/errors"),
+
+    // Performance
+    getPerformance: () => request("GET", "/api/performance"),
+
+    // Scheduled
+    getScheduled: (gid) => request("GET", `/api/guilds/${gid}/scheduled`),
+    addScheduled: (gid, data) => request("POST", `/api/guilds/${gid}/scheduled`, data),
+    deleteScheduled: (gid, idx) => request("DELETE", `/api/guilds/${gid}/scheduled/${idx}`),
+
+    // Cross-Server
+    crossAnnounce: (data) => request("POST", "/api/announce", data),
+
+    // API Rate
+    getApiRate: () => request("GET", "/api/stats/api-rate"),
   };
 })();

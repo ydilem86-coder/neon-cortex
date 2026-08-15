@@ -1,10 +1,13 @@
 """Discord bot async client wrapper."""
 
 import asyncio
+import hashlib
 import json
 import os
+import random
 import re
 import threading
+import time as _time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
@@ -271,6 +274,105 @@ def _load_protection_from_config() -> dict:
         return {}
 
 
+def _load_admins_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("admin_users", {})
+    except Exception:
+        return {}
+
+
+def _load_antinuke_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("antinuke_config", {})
+    except Exception:
+        return {}
+
+
+def _load_verification_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("verification", {})
+    except Exception:
+        return {}
+
+
+def _load_reaction_roles_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("reaction_roles", {})
+    except Exception:
+        return {}
+
+
+def _load_giveaways_from_config() -> list:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("giveaways", [])
+    except Exception:
+        return []
+
+
+def _load_level_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("level_config", {})
+    except Exception:
+        return {}
+
+
+def _load_levels_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("levels", {})
+    except Exception:
+        return {}
+
+
+def _load_custom_commands_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("custom_commands", {})
+    except Exception:
+        return {}
+
+
+def _load_birthday_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("birthday_config", {})
+    except Exception:
+        return {}
+
+
+def _load_suggestion_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("suggestion_config", {})
+    except Exception:
+        return {}
+
+
+def _load_suggestion_votes_from_config() -> dict:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("suggestion_votes", {})
+    except Exception:
+        return {}
+
+
 class BotManager:
     def __init__(self):
         self.client: Optional[discord.Client] = None
@@ -308,8 +410,29 @@ class BotManager:
         self.panel_channels: dict[int, int] = {}                # guild_id -> channel_id for panel
         self._welcome_log_callback: Optional[Callable[[str], None]] = None
         self._activity_callback: Optional[Callable[[str], None]] = None
+        self.admin_users: dict = _load_admins_from_config()
+        self.antinuke_config: dict = _load_antinuke_from_config()
+        self._nuke_tracker: dict[int, dict] = {}
+        self.verification_config: dict = _load_verification_from_config()
+        self.reaction_roles_config: dict = _load_reaction_roles_from_config()
+        self.giveaways: list = _load_giveaways_from_config()
+        self.level_config: dict = _load_level_from_config()
+        self.levels: dict = _load_levels_from_config()
+        self.custom_commands: dict = _load_custom_commands_from_config()
+        self._captcha_pending: dict[int, dict] = {}
+        self.afk_users: dict[int, dict] = {}
+        self.birthday_config: dict = _load_birthday_from_config()
+        self.suggestion_config: dict = _load_suggestion_from_config()
+        self.suggestion_votes: dict = _load_suggestion_votes_from_config()
+        self.command_stats: dict[str, int] = {}
+        self.error_log: list[dict] = []
+        self.api_calls: list[dict] = []
+        self._music_play_stats: dict[int, dict] = {}
+        self._invite_cache: dict[int, list] = {}
+        self._connect_time: float = _time.time()
         self._loop_thread = threading.Thread(target=self._run_loop_forever, daemon=True)
         self._loop_thread.start()
+        self._ensure_default_admin()
 
     def _run_loop_forever(self):
         asyncio.set_event_loop(self.loop)
@@ -388,6 +511,19 @@ class BotManager:
             await self._handle_raid(member)
             await self._handle_auto_role(member)
             await self._send_log(member.guild.id, f"👋 **دخول عضو جديد** {member.mention} ({member.display_name}) — {member.guild.name}")
+            try:
+                if member.guild:
+                    invites = await member.guild.invites()
+                    cached = self._invite_cache.get(member.guild.id, [])
+                    for inv in invites:
+                        for old in cached:
+                            if inv.code == old.get("code") and inv.uses > old.get("uses", 0):
+                                self._log_activity(f"🔗 دخول عبر دعوة: {member.display_name} بواسطة {inv.inviter} ({inv.code})")
+                                await self._send_log(member.guild.id, f"🔗 **دخول عبر دعوة** — {member.mention} بواسطة {inv.inviter} ({inv.code}, استُخدم {inv.uses} مرات)")
+                                break
+                    self._invite_cache[member.guild.id] = [{"code": i.code, "uses": i.uses, "inviter": str(i.inviter)} for i in invites]
+            except Exception:
+                pass
 
         @self.client.event
         async def on_member_remove(member: discord.Member):
@@ -408,9 +544,30 @@ class BotManager:
         async def on_message(message: discord.Message):
             if message.author.bot or not message.guild:
                 return
+            if await self._handle_captcha_check(message):
+                return
+            await self._add_xp(message.guild.id, message.author.id)
+            await self._handle_afk_on_message(message)
+            await self._handle_suggestion_message(message)
             if message.content.startswith(MUSIC_PREFIX):
+                _cmd = message.content.split(None, 1)[0][len(MUSIC_PREFIX):].lower()
+                if _cmd:
+                    self.command_stats[_cmd] = self.command_stats.get(_cmd, 0) + 1
                 await self._handle_music_command(message)
                 return
+            _first = message.content.split(None, 1)[0] if message.content.strip() else ""
+            for _pfx in ("!", ".", "?", "#", "$"):
+                if _first.startswith(_pfx) and len(_first) > 1:
+                    _cn = _first[1:].lower()
+                    self.command_stats[_cn] = self.command_stats.get(_cn, 0) + 1
+                    break
+            if message.content.lower().startswith("afk"):
+                if await self._handle_afk_command(message):
+                    return
+            if message.content.lower().startswith("remind "):
+                if await self._handle_remind_command(message):
+                    return
+            await self._handle_custom_command(message)
             await self._handle_automod(message)
             await self._handle_bot_insult(message)
             await self._handle_link_block(message)
@@ -445,6 +602,7 @@ class BotManager:
             ch = self.log_channels.get(guild.id)
             if ch:
                 await self._send_log(guild.id, f"🔨 **حظر** {user} — {guild.name}")
+            await self._check_antinuke_action(guild, "ban")
 
         @self.client.event
         async def on_member_unban(guild: discord.Guild, user):
@@ -457,6 +615,15 @@ class BotManager:
             ch = self.log_channels.get(member.guild.id)
             if ch and member.id != self.client.user.id:
                 await self._send_log(member.guild.id, f"👋 **غادر** {member.display_name} — {member.guild.name}")
+            if self.get_antinuke_config(member.guild.id).get("enabled") and member.id != self.client.user.id:
+                try:
+                    async for entry in member.guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
+                        if entry.target and entry.target.id == member.id:
+                            if entry.user and entry.user.id != self.client.user.id:
+                                await self._check_antinuke_action(member.guild, "kick")
+                            break
+                except Exception:
+                    pass
 
         @self.client.event
         async def on_message_delete(message):
@@ -480,12 +647,45 @@ class BotManager:
                 await self._send_log(before.guild.id, f"✏️ **تعديل رسالة** من {before.author.display_name} في #{before.channel.name}:\n**قبل:** {old}\n**بعد:** {new}")
 
         @self.client.event
+        async def on_member_update(before: discord.Member, after: discord.Member):
+            if before.bot or before.id == self.client.user.id:
+                return
+            cfg = self.get_protection_config(after.guild.id)
+            if not cfg.get("anti_hoist_enabled"):
+                return
+            if before.display_name == after.display_name:
+                return
+            hoist_chars = ('!', '.', '@', '#')
+            new_name = after.display_name
+            if new_name and len(new_name) > 0 and new_name[0] in hoist_chars:
+                action = cfg.get("anti_hoist_action", "rename")
+                if action == "kick":
+                    try:
+                        await after.kick(reason="Anti-Hoist: Name starts with special character")
+                        self._log_activity(f"👢 Anti-Hoist: Kicked {after.display_name} from {after.guild.name}")
+                        await self._send_log(after.guild.id, f"👢 **Anti-Hoist** — تم طرد {after.mention} — الاسم يبدأ بحرف خاص '{new_name[0]}'")
+                    except discord.Forbidden:
+                        pass
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        await after.edit(nick="Hoisted User", reason="Anti-Hoist: Name starts with special character")
+                        self._log_activity(f"✏️ Anti-Hoist: Renamed {before.display_name} to 'Hoisted User' in {after.guild.name}")
+                        await self._send_log(after.guild.id, f"✏️ **Anti-Hoist** — تم تغيير اسم {after.mention} من '{before.display_name}' إلى 'Hoisted User'")
+                    except discord.Forbidden:
+                        pass
+                    except Exception:
+                        pass
+
+        @self.client.event
         async def on_guild_channel_create(channel):
             if not channel.guild:
                 return
             ch = self.log_channels.get(channel.guild.id)
             if ch:
                 await self._send_log(channel.guild.id, f"📁 **إنشاء قناة** #{channel.name} ({channel.type}) — {channel.guild.name}")
+            await self._check_antinuke_action(channel.guild, "channel_create")
 
         @self.client.event
         async def on_guild_channel_delete(channel):
@@ -494,6 +694,27 @@ class BotManager:
             ch = self.log_channels.get(channel.guild.id)
             if ch:
                 await self._send_log(channel.guild.id, f"❌ **حذف قناة** #{channel.name} ({channel.type}) — {channel.guild.name}")
+            await self._check_antinuke_action(channel.guild, "channel_delete")
+
+        @self.client.event
+        async def on_guild_role_delete(role: discord.Role):
+            if not role.guild:
+                return
+            ch = self.log_channels.get(role.guild.id)
+            if ch:
+                await self._send_log(role.guild.id, f"❌ **حذف رول** @{role.name} — {role.guild.name}")
+            await self._check_antinuke_action(role.guild, "role_delete")
+
+        @self.client.event
+        async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+            if payload.member and payload.member.bot:
+                return
+            await self._handle_reaction_roles_add(payload)
+            await self._handle_suggestion_reaction(payload)
+
+        @self.client.event
+        async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+            await self._handle_reaction_roles_remove(payload)
 
         try:
             await self.client.login(token)
@@ -501,7 +722,10 @@ class BotManager:
             await asyncio.wait_for(ready_future, timeout=40)
             asyncio.create_task(self._reminder_worker())
             asyncio.create_task(self._scheduled_worker())
+            asyncio.create_task(self._scheduled_worker_cron())
             asyncio.create_task(self._auto_unban_worker())
+            asyncio.create_task(self._giveaway_worker())
+            asyncio.create_task(self._birthday_worker())
             return True, f"متصل: {self.user} | {len(self.guilds)} سيرفر"
         except discord.LoginFailure:
             await self._disconnect_async()
@@ -850,6 +1074,8 @@ class BotManager:
             "show_member_count": cfg.get("show_member_count", True),
             "border_style": cfg.get("border_style", "neon"),
             "custom_image": cfg.get("custom_image", ""),
+            "dm_enabled": cfg.get("dm_enabled", False),
+            "dm_message": cfg.get("dm_message", "Welcome to {server}! We're glad to have you here, {user}!"),
         }
 
     def set_welcome_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
@@ -888,6 +1114,15 @@ class BotManager:
         except Exception as e:
             if self._welcome_log_callback:
                 self._welcome_log_callback(f"فشل الترحيب: {e}")
+        if cfg.get("dm_enabled"):
+            try:
+                dm_msg = self._format_welcome_message(member, cfg.get("dm_message", "Welcome to {server}!"))
+                await member.send(dm_msg)
+                self._log_activity(f"📩 DM ترحيب أُرسل لـ {member.display_name}")
+            except discord.Forbidden:
+                pass
+            except Exception:
+                pass
 
     # ── FFmpeg Diagnostic ────────────────────────────────────
 
@@ -1078,6 +1313,8 @@ class BotManager:
             "raid_threshold": cfg.get("raid_threshold", 10),
             "raid_window": cfg.get("raid_window", 60),
             "greeting_protection": cfg.get("greeting_protection", False),
+            "anti_hoist_enabled": cfg.get("anti_hoist_enabled", False),
+            "anti_hoist_action": cfg.get("anti_hoist_action", "rename"),
         }
 
     def set_protection_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
@@ -1307,6 +1544,178 @@ class BotManager:
             except Exception:
                 pass
             await asyncio.sleep(300)
+
+    # ── Admin Login System ──────────────────────────────────
+
+    @staticmethod
+    def hash_password(password: str) -> str:
+        return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+    def _ensure_default_admin(self):
+        if not self.admin_users:
+            self.create_admin("admin", "admin123", ["all"])
+
+    def create_admin(self, username: str, password: str, permissions: list[str] = None) -> tuple[bool, str]:
+        username = username.strip().lower()
+        if not username or not password:
+            return False, "اسم المستخدم وكلمة المرور مطلوبان"
+        if username in self.admin_users:
+            return False, f"المستخدم {username} موجود بالفعل"
+        self.admin_users[username] = {
+            "password_hash": self.hash_password(password),
+            "permissions": permissions or ["all"],
+        }
+        self._save_admins()
+        return True, f"تم إنشاء المسؤول {username}"
+
+    def delete_admin(self, username: str) -> tuple[bool, str]:
+        username = username.strip().lower()
+        if username not in self.admin_users:
+            return False, f"المستخدم {username} غير موجود"
+        del self.admin_users[username]
+        self._save_admins()
+        return True, f"تم حذف المسؤول {username}"
+
+    def verify_admin(self, username: str, password: str) -> bool:
+        username = username.strip().lower()
+        admin = self.admin_users.get(username)
+        if not admin:
+            return False
+        return admin.get("password_hash") == self.hash_password(password)
+
+    def list_admins(self) -> list[dict]:
+        result = []
+        for username, data in self.admin_users.items():
+            result.append({
+                "username": username,
+                "permissions": data.get("permissions", []),
+            })
+        return result
+
+    def _save_admins(self):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["admin_users"] = self.admin_users
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+    # ── Anti-Nuke System ─────────────────────────────────────
+
+    def get_antinuke_config(self, guild_id: int) -> dict:
+        cfg = self.antinuke_config.get(str(guild_id), {})
+        return {
+            "enabled": cfg.get("enabled", False),
+            "max_channel_delete": cfg.get("max_channel_delete", 3),
+            "channel_delete_window": cfg.get("channel_delete_window", 30),
+            "max_role_delete": cfg.get("max_role_delete", 3),
+            "role_delete_window": cfg.get("role_delete_window", 30),
+            "max_channel_create": cfg.get("max_channel_create", 5),
+            "channel_create_window": cfg.get("channel_create_window", 30),
+            "max_kick": cfg.get("max_kick", 3),
+            "kick_window": cfg.get("kick_window", 60),
+            "max_ban": cfg.get("max_ban", 3),
+            "ban_window": cfg.get("ban_window", 60),
+            "action": cfg.get("action", "kick"),
+            "log_channel_id": cfg.get("log_channel_id", 0),
+        }
+
+    def set_antinuke_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.antinuke_config:
+            self.antinuke_config[gid] = {}
+        for key, value in kwargs.items():
+            self.antinuke_config[gid][key] = value
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["antinuke_config"] = self.antinuke_config
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True, "تم حفظ إعدادات Anti-Nuke"
+
+    async def _find_audit_perpetrator(self, guild: discord.Guild, action_type: str) -> Optional[discord.Member]:
+        audit_action_map = {
+            "channel_delete": discord.AuditLogAction.channel_delete,
+            "role_delete": discord.AuditLogAction.role_delete,
+            "channel_create": discord.AuditLogAction.channel_create,
+            "kick": discord.AuditLogAction.kick,
+            "ban": discord.AuditLogAction.ban,
+        }
+        action = audit_action_map.get(action_type)
+        if not action:
+            return None
+        try:
+            async for entry in guild.audit_logs(limit=10, action=action):
+                if entry.user and entry.user.id != self.client.user.id:
+                    member = guild.get_member(entry.user.id)
+                    return member or entry.user
+        except discord.Forbidden:
+            pass
+        except Exception:
+            pass
+        return None
+
+    async def _check_antinuke_action(self, guild: discord.Guild, action_type: str):
+        cfg = self.get_antinuke_config(guild.id)
+        if not cfg.get("enabled"):
+            return
+
+        perpetrator = await self._find_audit_perpetrator(guild, action_type)
+        if not perpetrator or perpetrator.bot or perpetrator.id == self.client.user.id:
+            return
+
+        now = datetime.now(timezone.utc).timestamp()
+        gid = guild.id
+
+        if gid not in self._nuke_tracker:
+            self._nuke_tracker[gid] = {}
+        if action_type not in self._nuke_tracker[gid]:
+            self._nuke_tracker[gid][action_type] = []
+
+        self._nuke_tracker[gid][action_type].append(now)
+
+        threshold_map = {
+            "channel_delete": (cfg.get("max_channel_delete", 3), cfg.get("channel_delete_window", 30)),
+            "role_delete": (cfg.get("max_role_delete", 3), cfg.get("role_delete_window", 30)),
+            "channel_create": (cfg.get("max_channel_create", 5), cfg.get("channel_create_window", 30)),
+            "kick": (cfg.get("max_kick", 3), cfg.get("kick_window", 60)),
+            "ban": (cfg.get("max_ban", 3), cfg.get("ban_window", 60)),
+        }
+
+        threshold, window = threshold_map.get(action_type, (3, 30))
+        cutoff = now - window
+        self._nuke_tracker[gid][action_type] = [
+            t for t in self._nuke_tracker[gid][action_type] if t > cutoff
+        ]
+
+        if len(self._nuke_tracker[gid][action_type]) >= threshold:
+            punish_action = cfg.get("action", "kick")
+            log_ch = cfg.get("log_channel_id", 0)
+
+            try:
+                if punish_action == "ban":
+                    await guild.ban(perpetrator, reason=f"Anti-Nuke: {action_type} threshold exceeded ({len(self._nuke_tracker[gid][action_type])} times)")
+                else:
+                    await perpetrator.kick(reason=f"Anti-Nuke: {action_type} threshold exceeded ({len(self._nuke_tracker[gid][action_type])} times)")
+
+                action_label = "حظر" if punish_action == "ban" else "طرد"
+                msg = f"🚨 **Anti-Nuke** — {action_label} {perpetrator.mention} — {action_type} ({len(self._nuke_tracker[gid][action_type])} مرات في {window}ث)"
+                self._log_activity(msg)
+                if log_ch:
+                    ch = self.client.get_channel(log_ch)
+                    if ch:
+                        await ch.send(msg)
+            except discord.Forbidden:
+                self._log_activity(f"⚠️ Anti-Nuke: فشل {punish_action} {perpetrator} — لا توجد صلاحية")
+            except Exception:
+                pass
+
+            self._nuke_tracker[gid][action_type] = []
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2054,6 +2463,7 @@ class BotManager:
                 "start_time": __import__("time").time(),
             }
             self.paused[guild_id] = False
+            self._track_music_play(guild_id, title, requester, duration)
             try:
                 asyncio.run_coroutine_threadsafe(self.send_or_update_panel(guild_id), self.loop)
             except Exception:
@@ -2133,6 +2543,7 @@ class BotManager:
                 "start_time": __import__("time").time(),
             }
             self.paused[guild_id] = False
+            self._track_music_play(guild_id, title, requester, duration)
             return True, f"🎵 جاري تشغيل: **{title}**"
         except ImportError:
             return False, "yt-dlp غير مثبت. شغّل: pip install yt-dlp"
@@ -2562,6 +2973,1440 @@ class BotManager:
                 return True, f"⚠️ تحذير {count}/3 — فشل الحظر التلقائي (صلاحيات?)"
         return True, f"⚠️ تحذير {count}/3 لـ {member}"
 
+    # ── Verification System ──────────────────────────────────
+
+    def get_verification_config(self, guild_id: int) -> dict:
+        cfg = self.verification_config.get(str(guild_id), {})
+        return {
+            "enabled": cfg.get("enabled", False),
+            "channel_id": cfg.get("channel_id", 0),
+            "role_id": cfg.get("role_id", 0),
+            "type": cfg.get("type", "button"),
+            "welcome_message": cfg.get("welcome_message", "Welcome! Please verify yourself."),
+            "success_message": cfg.get("success_message", "You have been verified!"),
+            "fail_message": cfg.get("fail_message", "Incorrect answer. Try again."),
+        }
+
+    def set_verification_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.verification_config:
+            self.verification_config[gid] = {}
+        for key, value in kwargs.items():
+            self.verification_config[gid][key] = value
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["verification"] = self.verification_config
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True, "تم حفظ إعدادات التحقق"
+
+    async def _handle_verification(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        if not guild:
+            return
+        cfg = self.get_verification_config(guild.id)
+        if not cfg["enabled"]:
+            await interaction.response.send_message("❌ التحقق غير مفعّل", ephemeral=True)
+            return
+        member = interaction.user
+        role = guild.get_role(cfg["role_id"])
+        if not role:
+            await interaction.response.send_message("❌ رول التحقق غير موجود", ephemeral=True)
+            return
+        if role in member.roles:
+            await interaction.response.send_message("✅ أنت موثّق بالفعل!", ephemeral=True)
+            return
+        try:
+            await member.add_roles(role, reason="Verification")
+            success_msg = cfg.get("success_message", "You have been verified!")
+            await interaction.response.send_message(f"✅ {success_msg}", ephemeral=True)
+            self._log_activity(f"✅ تم التحقق من {member.display_name} في {guild.name}")
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ لا توجد صلاحية لإعطاء الرول", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ خطأ: {e}", ephemeral=True)
+
+    async def _handle_captcha_check(self, message: discord.Message) -> bool:
+        gid = message.guild.id
+        if gid not in self._captcha_pending:
+            return False
+        pending = self._captcha_pending[gid]
+        if message.channel.id != pending.get("channel_id"):
+            return False
+        cfg = self.get_verification_config(gid)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        if message.content.strip() == str(pending["answer"]):
+            role = message.guild.get_role(cfg["role_id"])
+            if role:
+                try:
+                    await message.author.add_roles(role, reason="Captcha verification")
+                    success_msg = cfg.get("success_message", "You have been verified!")
+                    await message.channel.send(f"✅ {success_msg}", delete_after=5)
+                    self._log_activity(f"✅ تم التحقق (كابتشا) من {message.author.display_name} في {message.guild.name}")
+                except Exception:
+                    pass
+            del self._captcha_pending[gid]
+        else:
+            fail_msg = cfg.get("fail_message", "Incorrect answer. Try again.")
+            await message.channel.send(f"❌ {fail_msg}", delete_after=5)
+        return True
+
+    async def send_verification_panel(self, channel_id: int, guild_id: int) -> tuple[bool, str]:
+        cfg = self.get_verification_config(guild_id)
+        if not cfg["enabled"]:
+            return False, "التحقق غير مفعّل"
+        ch = self.client.get_channel(channel_id)
+        if not ch:
+            return False, "قناة غير موجودة"
+        ver_type = cfg.get("type", "button")
+        welcome_msg = cfg.get("welcome_message", "Welcome! Please verify yourself.")
+        if ver_type == "button":
+            embed = discord.Embed(title="🔐 Verification", description=welcome_msg, color=0x5865F2)
+            view = VerificationView(self)
+            try:
+                await ch.send(embed=embed, view=view)
+                return True, "تم إرسال لوحة التحقق"
+            except Exception as e:
+                return False, str(e)
+        else:
+            a = random.randint(1, 20)
+            b = random.randint(1, 20)
+            answer = a + b
+            self._captcha_pending[guild_id] = {"answer": answer, "channel_id": channel_id}
+            embed = discord.Embed(
+                title="🔐 Verification",
+                description=f"{welcome_msg}\n\n**ما هو ناتج {a} + {b}؟**\nاكتب الإجابة في الشات.",
+                color=0x5865F2,
+            )
+            try:
+                await ch.send(embed=embed)
+                return True, "تم إرسال كابتشا التحقق"
+            except Exception as e:
+                return False, str(e)
+
+    # ── Reaction Roles ──────────────────────────────────────
+
+    def setup_reaction_roles(self, guild_id: int, channel_id: int, message_id: int, roles_config: list) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.reaction_roles_config:
+            self.reaction_roles_config[gid] = {}
+        self.reaction_roles_config[gid] = {
+            "enabled": True,
+            "message_id": message_id,
+            "channel_id": channel_id,
+            "roles": roles_config,
+        }
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["reaction_roles"] = self.reaction_roles_config
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True, "تم ضبط الرول بالتفاعل"
+
+    def get_reaction_roles(self, guild_id: int) -> dict:
+        return self.reaction_roles_config.get(str(guild_id), {})
+
+    def remove_reaction_roles(self, guild_id: int) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid in self.reaction_roles_config:
+            del self.reaction_roles_config[gid]
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+            config["reaction_roles"] = self.reaction_roles_config
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            return True, "تم حذف الرول بالتفاعل"
+        return False, "لا توجد إعدادات رول بالتفاعل لهذا السيرفر"
+
+    async def _handle_reaction_roles_add(self, payload: discord.RawReactionActionEvent):
+        gid = str(payload.guild_id)
+        rr = self.reaction_roles_config.get(gid, {})
+        if not rr.get("enabled"):
+            return
+        if payload.message_id != rr.get("message_id"):
+            return
+        emoji = str(payload.emoji)
+        for role_entry in rr.get("roles", []):
+            if role_entry.get("emoji") == emoji:
+                guild = self.client.get_guild(payload.guild_id)
+                if not guild:
+                    return
+                member = guild.get_member(payload.user_id)
+                if not member or member.bot:
+                    return
+                role = guild.get_role(role_entry.get("role_id", 0))
+                if role:
+                    try:
+                        await member.add_roles(role, reason="Reaction role")
+                        self._log_activity(f"🎖️ رول تفاعلي {role.name} لـ {member.display_name}")
+                    except Exception:
+                        pass
+                break
+
+    async def _handle_reaction_roles_remove(self, payload: discord.RawReactionActionEvent):
+        gid = str(payload.guild_id)
+        rr = self.reaction_roles_config.get(gid, {})
+        if not rr.get("enabled"):
+            return
+        if payload.message_id != rr.get("message_id"):
+            return
+        emoji = str(payload.emoji)
+        for role_entry in rr.get("roles", []):
+            if role_entry.get("emoji") == emoji:
+                guild = self.client.get_guild(payload.guild_id)
+                if not guild:
+                    return
+                member = guild.get_member(payload.user_id)
+                if not member or member.bot:
+                    return
+                role = guild.get_role(role_entry.get("role_id", 0))
+                if role:
+                    try:
+                        await member.remove_roles(role, reason="Reaction role removed")
+                        self._log_activity(f"🎖️ إزالة رول تفاعلي {role.name} من {member.display_name}")
+                    except Exception:
+                        pass
+                break
+
+    # ── Giveaway System ──────────────────────────────────────
+
+    def _save_giveaways(self):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["giveaways"] = self.giveaways
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+    def create_giveaway(self, channel_id: int, prize: str, winners_count: int, duration_hours: float, host_id: int) -> tuple[bool, str]:
+        giveaway_id = random.randint(100000, 999999)
+        end_time = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).isoformat()
+        giveaway = {
+            "id": giveaway_id,
+            "channel_id": channel_id,
+            "prize": prize,
+            "winners_count": winners_count,
+            "end_time": end_time,
+            "host_id": host_id,
+            "ended": False,
+            "winner_ids": [],
+            "entries": [],
+        }
+        self.giveaways.append(giveaway)
+        self._save_giveaways()
+        return True, giveaway_id
+
+    async def end_giveaway(self, giveaway_id: int) -> tuple[bool, str]:
+        for gw in self.giveaways:
+            if gw["id"] == giveaway_id and not gw.get("ended"):
+                gw["ended"] = True
+                entries = gw.get("entries", [])
+                winners_count = min(gw["winners_count"], len(entries))
+                if winners_count > 0:
+                    winner_ids = random.sample(entries, winners_count)
+                    gw["winner_ids"] = winner_ids
+                else:
+                    gw["winner_ids"] = []
+                self._save_giveaways()
+                ch = self.client.get_channel(gw["channel_id"]) if self.client else None
+                if ch:
+                    if gw["winner_ids"]:
+                        mentions = " ".join(f"<@{wid}>" for wid in gw["winner_ids"])
+                        embed = discord.Embed(
+                            title="🎉 انتهى الإيفنت!",
+                            description=f"**الجائزة:** {gw['prize']}\n\n**الفائزون:** {mentions}",
+                            color=0xFFD700,
+                        )
+                    else:
+                        embed = discord.Embed(
+                            title="🎉 انتهى الإيفنت!",
+                            description=f"**الجائزة:** {gw['prize']}\n\nلم يشارك أحد.",
+                            color=0xFFD700,
+                        )
+                    try:
+                        await ch.send(embed=embed)
+                    except Exception:
+                        pass
+                self._log_activity(f"🎉 انتهى إيفنت: {gw['prize']}")
+                return True, "تم إنهاء الإيفنت"
+        return False, "الإيفنت غير موجود أو منتهي بالفعل"
+
+    def get_active_giveaways(self, guild_id: int) -> list:
+        result = []
+        for gw in self.giveaways:
+            if not gw.get("ended"):
+                ch = self.client.get_channel(gw["channel_id"]) if self.client else None
+                if ch and hasattr(ch, "guild") and ch.guild and ch.guild.id == guild_id:
+                    result.append(gw)
+        return result
+
+    async def _giveaway_worker(self):
+        await asyncio.sleep(30)
+        while True:
+            try:
+                now = datetime.now(timezone.utc)
+                for gw in list(self.giveaways):
+                    if gw.get("ended"):
+                        continue
+                    end_time = datetime.fromisoformat(gw["end_time"])
+                    if now >= end_time:
+                        await self.end_giveaway(gw["id"])
+            except Exception:
+                pass
+            await asyncio.sleep(30)
+
+    async def send_giveaway_message(self, channel_id: int, giveaway: dict) -> tuple[bool, str]:
+        ch = self.client.get_channel(channel_id)
+        if not ch:
+            return False, "قناة غير موجودة"
+        try:
+            end_dt = datetime.fromisoformat(giveaway["end_time"])
+            remaining = end_dt - datetime.now(timezone.utc)
+            hours = int(remaining.total_seconds() // 3600)
+            minutes = int((remaining.total_seconds() % 3600) // 60)
+            time_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+            embed = discord.Embed(
+                title="🎉 إيفنت!",
+                description=(
+                    f"**الجائزة:** {giveaway['prize']}\n"
+                    f"**عدد الفائزين:** {giveaway['winners_count']}\n"
+                    f"**المتبقي:** {time_str}\n"
+                    f"**عدد المشاركين:** {len(giveaway.get('entries', []))}"
+                ),
+                color=0xFFD700,
+            )
+            embed.set_footer(text=f"ID: {giveaway['id']}")
+            view = GiveawayView(self, giveaway["id"])
+            await ch.send(embed=embed, view=view)
+            return True, f"تم إرسال الإيفنت (ID: {giveaway['id']})"
+        except Exception as e:
+            return False, str(e)
+
+    # ── Level System ─────────────────────────────────────────
+
+    def get_level_config(self, guild_id: int) -> dict:
+        cfg = self.level_config.get(str(guild_id), {})
+        return {
+            "enabled": cfg.get("enabled", False),
+            "xp_per_message": cfg.get("xp_per_message", [15, 25]),
+            "level_up_channel": cfg.get("level_up_channel", 0),
+            "level_roles": cfg.get("level_roles", []),
+        }
+
+    def set_level_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.level_config:
+            self.level_config[gid] = {}
+        for key, value in kwargs.items():
+            self.level_config[gid][key] = value
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["level_config"] = self.level_config
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True, "تم حفظ إعدادات المستويات"
+
+    def _save_levels(self):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["levels"] = self.levels
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+    def get_user_level(self, guild_id: int, user_id: int) -> dict:
+        gid = str(guild_id)
+        uid = str(user_id)
+        return self.levels.get(gid, {}).get(uid, {"xp": 0, "level": 0, "messages": 0})
+
+    def get_level_leaderboard(self, guild_id: int, limit: int = 10) -> list:
+        gid = str(guild_id)
+        guild_levels = self.levels.get(gid, {})
+        sorted_users = sorted(
+            guild_levels.items(),
+            key=lambda x: (x[1].get("level", 0), x[1].get("xp", 0)),
+            reverse=True,
+        )
+        leaderboard = []
+        for uid, data in sorted_users[:limit]:
+            leaderboard.append({
+                "user_id": int(uid),
+                "level": data.get("level", 0),
+                "xp": data.get("xp", 0),
+                "messages": data.get("messages", 0),
+            })
+        return leaderboard
+
+    def _get_xp_for_level(self, level: int) -> int:
+        return 5 * (level ** 2) + 50 * level + 100
+
+    async def _add_xp(self, guild_id: int, user_id: int):
+        cfg = self.get_level_config(guild_id)
+        if not cfg.get("enabled"):
+            return
+        gid = str(guild_id)
+        uid = str(user_id)
+        if gid not in self.levels:
+            self.levels[gid] = {}
+        if uid not in self.levels[gid]:
+            self.levels[gid][uid] = {"xp": 0, "level": 0, "messages": 0}
+        user_data = self.levels[gid][uid]
+        xp_range = cfg.get("xp_per_message", [15, 25])
+        if isinstance(xp_range, list) and len(xp_range) >= 2:
+            xp_gain = random.randint(xp_range[0], xp_range[1])
+        elif isinstance(xp_range, (int, float)):
+            xp_gain = int(xp_range)
+        else:
+            xp_gain = random.randint(15, 25)
+        user_data["xp"] = user_data.get("xp", 0) + xp_gain
+        user_data["messages"] = user_data.get("messages", 0) + 1
+        old_level = user_data.get("level", 0)
+        xp_needed = self._get_xp_for_level(old_level)
+        leveled_up = False
+        while user_data["xp"] >= xp_needed:
+            user_data["level"] = user_data.get("level", 0) + 1
+            user_data["xp"] -= xp_needed
+            leveled_up = True
+            old_level = user_data["level"]
+            xp_needed = self._get_xp_for_level(old_level)
+        if leveled_up:
+            self._save_levels()
+            guild = self.client.get_guild(guild_id) if self.client else None
+            if guild:
+                member = guild.get_member(user_id)
+                if member:
+                    level_up_channel_id = cfg.get("level_up_channel", 0)
+                    channel = self.client.get_channel(level_up_channel_id) if level_up_channel_id else None
+                    if not channel:
+                        channel = guild.system_channel
+                    if channel:
+                        try:
+                            await channel.send(f"🎉 {member.mention} leveled up to **Level {user_data['level']}**!")
+                        except Exception:
+                            pass
+                    level_roles = cfg.get("level_roles", [])
+                    for lr in level_roles:
+                        if lr.get("level") == user_data["level"]:
+                            role = guild.get_role(lr.get("role_id", 0))
+                            if role:
+                                try:
+                                    await member.add_roles(role, reason=f"Level {user_data['level']}")
+                                except Exception:
+                                    pass
+        else:
+            self._save_levels()
+
+    # ── Custom Commands ──────────────────────────────────────
+
+    def create_custom_command(self, guild_id: int, name: str, **kwargs) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.custom_commands:
+            self.custom_commands[gid] = {}
+        cmd_data = {
+            "response": kwargs.get("response", ""),
+            "type": kwargs.get("type", "text"),
+            "embed_data": kwargs.get("embed_data", {}),
+            "cooldown": kwargs.get("cooldown", 0),
+            "permissions": kwargs.get("permissions", []),
+        }
+        self.custom_commands[gid][name.lower()] = cmd_data
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["custom_commands"] = self.custom_commands
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True, f"تم إنشاء الأمر المخصص: {name}"
+
+    def delete_custom_command(self, guild_id: int, name: str) -> tuple[bool, str]:
+        gid = str(guild_id)
+        cmds = self.custom_commands.get(gid, {})
+        if name.lower() in cmds:
+            del cmds[name.lower()]
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+            config["custom_commands"] = self.custom_commands
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            return True, f"تم حذف الأمر: {name}"
+        return False, "الأمر غير موجود"
+
+    def get_custom_commands(self, guild_id: int) -> dict:
+        return self.custom_commands.get(str(guild_id), {})
+
+    async def _handle_custom_command(self, message: discord.Message):
+        content = message.content
+        if not content or len(content) < 2:
+            return
+        prefix = content[0]
+        if prefix not in ("!", ".", "?", "#", "$"):
+            return
+        parts = content.split(None, 1)
+        cmd_name = parts[0][1:].lower()
+        if not cmd_name:
+            return
+        gid = str(message.guild.id)
+        cmds = self.custom_commands.get(gid, {})
+        if cmd_name not in cmds:
+            return
+        cmd = cmds[cmd_name]
+        cmd_type = cmd.get("type", "text")
+        response = cmd.get("response", "")
+        if cmd_type == "embed":
+            embed_data = cmd.get("embed_data", {})
+            embed = discord.Embed(
+                title=embed_data.get("title", ""),
+                description=embed_data.get("description", response),
+                color=int(embed_data.get("color", "#5865F2").lstrip("#"), 16) if embed_data.get("color") else 0x5865F2,
+            )
+            if embed_data.get("footer"):
+                embed.set_footer(text=embed_data["footer"])
+            if embed_data.get("image"):
+                embed.set_image(url=embed_data["image"])
+            if embed_data.get("thumbnail"):
+                embed.set_thumbnail(url=embed_data["thumbnail"])
+            for field in embed_data.get("fields", []):
+                embed.add_field(name=field.get("name", ""), value=field.get("value", ""), inline=field.get("inline", False))
+            try:
+                await message.channel.send(embed=embed)
+            except Exception:
+                pass
+        else:
+            try:
+                await message.channel.send(response)
+            except Exception:
+                pass
+
+    # ── Birthday System ──────────────────────────────────────
+
+    def get_birthday_config(self, guild_id: int) -> dict:
+        cfg = self.birthday_config.get(str(guild_id), {})
+        return {
+            "birthday_enabled": cfg.get("birthday_enabled", False),
+            "birthday_channel_id": cfg.get("birthday_channel_id", 0),
+            "birthday_role_id": cfg.get("birthday_role_id", 0),
+        }
+
+    def set_birthday_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.birthday_config:
+            self.birthday_config[gid] = {}
+        for key, value in kwargs.items():
+            self.birthday_config[gid][key] = value
+        self._save_birthday_config()
+        return True, "تم حفظ إعدادات أعياد الميلاد"
+
+    def _save_birthday_config(self):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["birthday_config"] = self.birthday_config
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+    def set_birthday(self, guild_id: int, user_id: int, month: int, day: int, year: int = 0) -> tuple[bool, str]:
+        gid = str(guild_id)
+        uid = str(user_id)
+        if gid not in self.birthday_config:
+            self.birthday_config[gid] = {}
+        if "birthdays" not in self.birthday_config[gid]:
+            self.birthday_config[gid]["birthdays"] = {}
+        self.birthday_config[gid]["birthdays"][uid] = {
+            "month": month,
+            "day": day,
+            "year": year,
+            "last_wished": 0,
+        }
+        self._save_birthday_config()
+        return True, f"تم ضبط عيد الميلاد: {month}/{day}"
+
+    def remove_birthday(self, guild_id: int, user_id: int) -> tuple[bool, str]:
+        gid = str(guild_id)
+        uid = str(user_id)
+        birthdays = self.birthday_config.get(gid, {}).get("birthdays", {})
+        if uid in birthdays:
+            del birthdays[uid]
+            self._save_birthday_config()
+            return True, "تم حذف عيد الميلاد"
+        return False, "لم يتم العثور على عيد ميلاد لهذا العضو"
+
+    def get_birthdays(self, guild_id: int) -> dict:
+        gid = str(guild_id)
+        return self.birthday_config.get(gid, {}).get("birthdays", {})
+
+    async def _birthday_worker(self):
+        await asyncio.sleep(60)
+        while True:
+            try:
+                now = datetime.now()
+                current_year = now.year
+                current_month = now.month
+                current_day = now.day
+                for guild in list(self.guilds):
+                    cfg = self.get_birthday_config(guild.id)
+                    if not cfg.get("birthday_enabled"):
+                        continue
+                    channel_id = cfg.get("birthday_channel_id", 0)
+                    role_id = cfg.get("birthday_role_id", 0)
+                    if not channel_id:
+                        continue
+                    birthdays = self.get_birthdays(guild.id)
+                    for uid_str, bday_data in birthdays.items():
+                        if bday_data["month"] == current_month and bday_data["day"] == current_day:
+                            if bday_data.get("last_wished") == current_year:
+                                continue
+                            user_id = int(uid_str)
+                            member = guild.get_member(user_id)
+                            if not member:
+                                continue
+                            bday_data["last_wished"] = current_year
+                            self._save_birthday_config()
+                            ch = guild.get_channel(channel_id)
+                            if ch:
+                                try:
+                                    age_str = ""
+                                    if bday_data.get("year") and bday_data["year"] > 0:
+                                        age = current_year - bday_data["year"]
+                                        age_str = f" — {age} سنة!"
+                                    embed = discord.Embed(
+                                        title="🎂 عيد ميلاد سعيد!",
+                                        description=f"**{member.mention}** عيد ميلاده اليوم{age_str}\n\nكل سنة وأنت بخير! 🎉",
+                                        color=0xFFD700,
+                                    )
+                                    embed.set_thumbnail(url=str(member.display_avatar.url))
+                                    content = member.mention if role_id else None
+                                    await ch.send(content=content, embed=embed)
+                                    self._log_activity(f"🎂 عيد ميلاد: {member.display_name} في {guild.name}")
+                                except Exception:
+                                    pass
+                            if role_id:
+                                role = guild.get_role(role_id)
+                                if role:
+                                    try:
+                                        await member.add_roles(role, reason="Birthday role")
+                                    except Exception:
+                                        pass
+            except Exception:
+                pass
+            await asyncio.sleep(300)
+
+    # ── AFK System ───────────────────────────────────────────
+
+    def _set_afk(self, user_id: int, guild_id: int, reason: str = "No reason"):
+        self.afk_users[user_id] = {
+            "reason": reason,
+            "since": _time.time(),
+            "guild_id": guild_id,
+        }
+
+    def _remove_afk(self, user_id: int) -> dict | None:
+        return self.afk_users.pop(user_id, None)
+
+    def _get_afk(self, user_id: int) -> dict | None:
+        return self.afk_users.get(user_id)
+
+    def _format_time_ago(self, timestamp: float) -> str:
+        diff = _time.time() - timestamp
+        if diff < 60:
+            return f"{int(diff)} ثانية"
+        elif diff < 3600:
+            return f"{int(diff // 60)} دقيقة"
+        elif diff < 86400:
+            return f"{int(diff // 3600)} ساعة"
+        else:
+            return f"{int(diff // 86400)} يوم"
+
+    async def _handle_afk_command(self, message: discord.Message):
+        content = message.content
+        if not content.startswith("afk ") and content.strip().lower() != "afk":
+            return False
+        parts = content.split(None, 1)
+        reason = parts[1].strip() if len(parts) > 1 else "No reason"
+        self._set_afk(message.author.id, message.guild.id, reason)
+        try:
+            await message.channel.send(
+                f"💤 **{message.author.display_name}** is now AFK: {reason}",
+                delete_after=8,
+            )
+        except Exception:
+            pass
+        return True
+
+    async def _handle_afk_on_message(self, message: discord.Message):
+        if message.author.bot or not message.guild:
+            return
+        afk_data = self._remove_afk(message.author.id)
+        if afk_data:
+            try:
+                elapsed = self._format_time_ago(afk_data["since"])
+                await message.channel.send(
+                    f"👋 Welcome back **{message.author.display_name}**! You were AFK for {elapsed}.",
+                    delete_after=8,
+                )
+            except Exception:
+                pass
+        for user in message.mentions:
+            if user.id == message.author.id:
+                continue
+            afk_data = self._get_afk(user.id)
+            if afk_data:
+                try:
+                    elapsed = self._format_time_ago(afk_data["since"])
+                    await message.channel.send(
+                        f"💤 **{user.display_name}** is AFK since {elapsed}: {afk_data['reason']}",
+                        delete_after=10,
+                    )
+                except Exception:
+                    pass
+                break
+
+    # ── Reminder System Enhancement ──────────────────────────
+
+    @staticmethod
+    def _parse_time(time_str: str) -> int | None:
+        """Parse time string like 1h, 30m, 2d into seconds."""
+        match = re.match(r'^(\d+)([smhd])$', time_str.lower().strip())
+        if not match:
+            return None
+        amount = int(match.group(1))
+        unit = match.group(2)
+        multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        return amount * multipliers[unit]
+
+    async def _handle_remind_command(self, message: discord.Message):
+        content = message.content
+        if not content.startswith("remind "):
+            return False
+        parts = content.split(None, 2)
+        if len(parts) < 3:
+            try:
+                await message.channel.send("Usage: `remind <time> <message>` (e.g., `remind 1h Check this`)", delete_after=8)
+            except Exception:
+                pass
+            return True
+        time_str = parts[1]
+        seconds = self._parse_time(time_str)
+        if seconds is None or seconds <= 0:
+            try:
+                await message.channel.send("Invalid time format. Use `s` (seconds), `m` (minutes), `h` (hours), `d` (days).", delete_after=8)
+            except Exception:
+                pass
+            return True
+        reminder_msg = parts[2]
+        timestamp = (datetime.now() + timedelta(seconds=seconds)).isoformat()
+        self.set_reminder(message.channel.id, f"{message.author.mention}: {reminder_msg}", timestamp)
+        try:
+            await message.channel.send(f"⏰ Reminder set! I'll remind you in `{time_str}`.", delete_after=8)
+        except Exception:
+            pass
+        return True
+
+    # ── Suggestion System ────────────────────────────────────
+
+    def get_suggestion_config(self, guild_id: int) -> dict:
+        cfg = self.suggestion_config.get(str(guild_id), {})
+        return {
+            "enabled": cfg.get("enabled", False),
+            "channel_id": cfg.get("channel_id", 0),
+            "up_emoji": cfg.get("up_emoji", "👍"),
+            "down_emoji": cfg.get("down_emoji", "👎"),
+            "min_votes": cfg.get("min_votes", 3),
+            "log_channel": cfg.get("log_channel", 0),
+        }
+
+    def set_suggestion_config(self, guild_id: int, **kwargs) -> tuple[bool, str]:
+        gid = str(guild_id)
+        if gid not in self.suggestion_config:
+            self.suggestion_config[gid] = {}
+        for key, value in kwargs.items():
+            self.suggestion_config[gid][key] = value
+        self._save_suggestion_config()
+        return True, "تم حفظ إعدادات الاقتراحات"
+
+    def _save_suggestion_config(self):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["suggestion_config"] = self.suggestion_config
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+    def _save_suggestion_votes(self):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+        config["suggestion_votes"] = self.suggestion_votes
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+    async def _handle_suggestion_message(self, message: discord.Message):
+        if message.author.bot or not message.guild:
+            return
+        cfg = self.get_suggestion_config(message.guild.id)
+        if not cfg["enabled"]:
+            return
+        if message.channel.id != cfg["channel_id"]:
+            return
+        perms = message.author.guild_permissions
+        if perms.manage_messages or perms.administrator:
+            return
+        up_emoji = cfg["up_emoji"]
+        down_emoji = cfg["down_emoji"]
+        embed = discord.Embed(
+            title="💡 Suggestion",
+            description=message.content,
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_author(name=str(message.author), icon_url=str(message.author.display_avatar.url))
+        embed.set_footer(text=f"Suggestion by {message.author.display_name}")
+        try:
+            await message.delete()
+            suggestion_msg = await message.channel.send(embed=embed)
+            await suggestion_msg.add_reaction(up_emoji)
+            await suggestion_msg.add_reaction(down_emoji)
+            gid = str(message.guild.id)
+            sid = str(suggestion_msg.id)
+            if gid not in self.suggestion_votes:
+                self.suggestion_votes[gid] = {}
+            self.suggestion_votes[gid][sid] = {
+                "upvotes": [],
+                "downvotes": [],
+                "author_id": message.author.id,
+                "channel_id": message.channel.id,
+            }
+            self._save_suggestion_votes()
+            self._log_activity(f"💡 اقتراح جديد من {message.author.display_name} في #{message.channel.name}")
+        except discord.Forbidden:
+            pass
+        except Exception:
+            pass
+
+    async def _handle_suggestion_reaction(self, payload: discord.RawReactionActionEvent):
+        if payload.member and payload.member.bot:
+            return
+        if not payload.guild_id:
+            return
+        cfg = self.get_suggestion_config(payload.guild_id)
+        if not cfg["enabled"]:
+            return
+        gid = str(payload.guild_id)
+        sid = str(payload.message_id)
+        votes = self.suggestion_votes.get(gid, {}).get(sid)
+        if not votes:
+            return
+        user_id = payload.user_id
+        emoji_str = str(payload.emoji)
+        up_emoji = cfg["up_emoji"]
+        down_emoji = cfg["down_emoji"]
+        if emoji_str == up_emoji:
+            if user_id in votes["downvotes"]:
+                votes["downvotes"].remove(user_id)
+            if user_id not in votes["upvotes"]:
+                votes["upvotes"].append(user_id)
+        elif emoji_str == down_emoji:
+            if user_id in votes["upvotes"]:
+                votes["upvotes"].remove(user_id)
+            if user_id not in votes["downvotes"]:
+                votes["downvotes"].append(user_id)
+        else:
+            return
+        self._save_suggestion_votes()
+        up_count = len(votes["upvotes"])
+        down_count = len(votes["downvotes"])
+        min_votes = cfg.get("min_votes", 3)
+        log_channel_id = cfg.get("log_channel", 0)
+        if (up_count >= min_votes or down_count >= min_votes) and log_channel_id:
+            ch = self.client.get_channel(log_channel_id)
+            if ch:
+                status = "✅ Accepted" if up_count > down_count else "❌ Rejected"
+                try:
+                    embed = discord.Embed(
+                        title=f"Suggestion {status}",
+                        description=f"👍 {up_count} | 👎 {down_count}\n\n[Jump to suggestion](https://discord.com/channels/{payload.guild_id}/{votes['channel_id']}/{sid})",
+                        color=0x2ECC71 if up_count > down_count else 0xE74C3C,
+                    )
+                    await ch.send(embed=embed)
+                except Exception:
+                    pass
+
+
+    # ── 1. Music Queue Visual ──────────────────────────────────
+
+    def get_queue_display(self, guild_id: int) -> str:
+        info = self.np_info.get(guild_id, {})
+        queue = self.music_queues.get(guild_id, [])
+        lines = []
+        if info.get("title"):
+            dur = info.get("duration", 0)
+            d = f"{dur // 60}:{dur % 60:02d}" if dur else "?"
+            lines.append(f"▶️ **{info['title'][:60]}** ({d}) — {info.get('requester', '?')}")
+        else:
+            lines.append("🔴 لا يوجد تشغيل حالياً")
+        if queue:
+            lines.append("")
+            for i, t in enumerate(queue[:10]):
+                dur = t.get("duration", 0)
+                d = f"{dur // 60}:{dur % 60:02d}" if dur else ""
+                lines.append(f"`{i+1}.` {t.get('title', '?')[:50]} `{d}` — {t.get('requester', '?')}")
+            if len(queue) > 10:
+                lines.append(f"\n...و {len(queue) - 10} أغنية أخرى")
+        lines.append(f"\n📋 الإجمالي: {len(queue)} في القائمة")
+        return "\n".join(lines)
+
+    def get_music_stats(self, guild_id: int) -> dict:
+        stats = self._music_play_stats.get(guild_id, {})
+        queue = self.music_queues.get(guild_id, [])
+        total_plays = stats.get("total_plays", 0)
+        total_time = stats.get("total_time", 0)
+        top_songs = sorted(stats.get("songs", {}).items(), key=lambda x: x[1], reverse=True)[:10]
+        top_requesters = sorted(stats.get("requesters", {}).items(), key=lambda x: x[1], reverse=True)[:10]
+        return {
+            "total_plays": total_plays,
+            "total_time": total_time,
+            "total_time_fmt": f"{total_time // 3600}h {(total_time % 3600) // 60}m",
+            "top_songs": [{"title": t, "plays": c} for t, c in top_songs],
+            "top_requesters": [{"requester": r, "plays": c} for r, c in top_requesters],
+            "queue_size": len(queue),
+        }
+
+    def _track_music_play(self, guild_id: int, title: str, requester: str, duration: int):
+        if guild_id not in self._music_play_stats:
+            self._music_play_stats[guild_id] = {"total_plays": 0, "total_time": 0, "songs": {}, "requesters": {}}
+        s = self._music_play_stats[guild_id]
+        s["total_plays"] += 1
+        s["total_time"] += duration
+        s["songs"][title] = s["songs"].get(title, 0) + 1
+        if requester:
+            s["requesters"][requester] = s["requesters"].get(requester, 0) + 1
+
+    # ── 2. Lyrics Search ──────────────────────────────────────
+
+    async def search_lyrics(self, query: str) -> Optional[dict]:
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                search_url = f"https://api.lyrics.ovh/v1/{query}"
+                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        lyrics_data = data.get("lyrics", {})
+                        return {
+                            "title": lyrics_data.get("title", query),
+                            "artist": lyrics_data.get("artist", ""),
+                            "lyrics": lyrics_data.get("lyrics", ""),
+                            "url": f"https://genius.com/search?q={query.replace(' ', '+')}",
+                        }
+        except Exception:
+            pass
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                search_url = f"https://lrclib.net/api/search?q={query}"
+                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        results = await resp.json()
+                        if results:
+                            r = results[0]
+                            synced = r.get("syncedLyrics") or r.get("plainLyrics", "")
+                            return {
+                                "title": r.get("trackName", query),
+                                "artist": r.get("artistName", ""),
+                                "lyrics": synced,
+                                "url": r.get("url", ""),
+                            }
+        except Exception:
+            pass
+        return None
+
+    # ── 4. Now Playing Enhanced ────────────────────────────────
+
+    def get_now_playing_info(self, guild_id: int) -> Optional[dict]:
+        info = self.np_info.get(guild_id)
+        if not info:
+            return None
+        elapsed = 0
+        duration = info.get("duration", 0)
+        if info.get("start_time"):
+            if self.paused.get(guild_id):
+                elapsed = int(self._pause_elapsed.get(guild_id, 0))
+            else:
+                elapsed = int(_time.time() - info["start_time"])
+        return {
+            "title": info.get("title", ""),
+            "url": info.get("url", ""),
+            "thumbnail": info.get("thumbnail", ""),
+            "duration": duration,
+            "requester": info.get("requester", ""),
+            "channel": info.get("channel", ""),
+            "progress": elapsed,
+            "progress_fmt": f"{elapsed // 60}:{elapsed % 60:02d}",
+            "duration_fmt": f"{duration // 60}:{duration % 60:02d}" if duration else "?",
+            "volume": self.get_volume(guild_id),
+            "paused": self.paused.get(guild_id, False),
+        }
+
+    # ── 5. Webhook Manager ────────────────────────────────────
+
+    async def get_webhooks(self, guild_id: int) -> list[dict]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return []
+        try:
+            webhooks = await guild.webhooks()
+            return [{"id": w.id, "name": w.name, "channel_id": w.channel.id if w.channel else 0,
+                      "channel_name": w.channel.name if w.channel else "?", "avatar": str(w.avatar.url) if w.avatar else ""} for w in webhooks]
+        except discord.Forbidden:
+            return []
+        except Exception:
+            return []
+
+    async def create_webhook(self, guild_id: int, channel_id: int, name: str = "Bot Webhook") -> tuple[bool, str]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return False, "سيرفر غير موجود"
+        channel = guild.get_channel(channel_id)
+        if not channel:
+            return False, "قناة غير موجودة"
+        try:
+            wh = await channel.create_webhook(name=name)
+            return True, f"تم إنشاء Webhook: {wh.name} (ID: {wh.id})"
+        except discord.Forbidden:
+            return False, "لا توجد صلاحية لإنشاء Webhook"
+        except Exception as e:
+            return False, str(e)
+
+    async def delete_webhook(self, guild_id: int, webhook_id: int) -> tuple[bool, str]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return False, "سيرفر غير موجود"
+        try:
+            webhooks = await guild.webhooks()
+            for wh in webhooks:
+                if wh.id == webhook_id:
+                    await wh.delete()
+                    return True, f"تم حذف Webhook: {wh.name}"
+            return False, "Webhook غير موجود"
+        except discord.Forbidden:
+            return False, "لا توجد صلاحية لحذف Webhook"
+        except Exception as e:
+            return False, str(e)
+
+    async def send_webhook(self, webhook_id: int, content: str = "", embeds: list = None) -> tuple[bool, str]:
+        if not self.client:
+            return False, "البوت غير متصل"
+        try:
+            wh = await self.client.fetch_webhook(webhook_id)
+            discord_embeds = []
+            if embeds:
+                for ed in embeds:
+                    e = discord.Embed(
+                        title=ed.get("title", ""),
+                        description=ed.get("description", ""),
+                        color=int(ed.get("color", "#5865F2").lstrip("#"), 16) if ed.get("color") else 0x5865F2,
+                    )
+                    for f in ed.get("fields", []):
+                        e.add_field(name=f.get("name", ""), value=f.get("value", ""), inline=f.get("inline", False))
+                    discord_embeds.append(e)
+            await wh.send(content=content or None, embeds=discord_embeds if discord_embeds else None)
+            return True, "تم الإرسال عبر Webhook"
+        except Exception as e:
+            return False, str(e)
+
+    # ── 6. Emoji Manager ──────────────────────────────────────
+
+    async def get_emojis(self, guild_id: int) -> list[dict]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return []
+        result = []
+        for e in guild.emojis:
+            result.append({
+                "id": e.id,
+                "name": e.name,
+                "animated": e.animated,
+                "url": str(e.url),
+                "available": e.available,
+                "created": e.created_at.strftime("%Y-%m-%d") if e.created_at else "",
+            })
+        return result
+
+    async def create_emoji(self, guild_id: int, name: str, image_url: str) -> tuple[bool, str]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return False, "سيرفر غير موجود"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url) as resp:
+                    if resp.status != 200:
+                        return False, "فشل تحميل الصورة"
+                    data = await resp.read()
+            emoji = await guild.create_custom_emoji(name=name, image=data)
+            return True, f"تم إنشاء الإيموجي: {emoji} (ID: {emoji.id})"
+        except discord.Forbidden:
+            return False, "لا توجد صلاحية لإدارة الإيموجيات"
+        except Exception as e:
+            return False, str(e)
+
+    async def delete_emoji(self, guild_id: int, emoji_id: int) -> tuple[bool, str]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return False, "سيرفر غير موجود"
+        emoji = guild.get_emoji(emoji_id)
+        if not emoji:
+            return False, "إيموجي غير موجود"
+        try:
+            name = emoji.name
+            await emoji.delete()
+            return True, f"تم حذف الإيموجي: {name}"
+        except discord.Forbidden:
+            return False, "لا توجد صلاحية لحذف الإيموجي"
+        except Exception as e:
+            return False, str(e)
+
+    # ── 7. Role Hierarchy ─────────────────────────────────────
+
+    def get_role_hierarchy(self, guild_id: int) -> list[dict]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return []
+        roles = sorted(guild.roles, key=lambda r: r.position, reverse=True)
+        result = []
+        for r in roles:
+            member_count = sum(1 for m in guild.members if r in m.roles and not r.is_default())
+            result.append({
+                "id": r.id,
+                "name": r.name,
+                "position": r.position,
+                "color": str(r.color) if r.color != discord.Color.default() else "#000000",
+                "member_count": member_count,
+                "mentionable": r.mentionable,
+                "hoist": r.hoist,
+                "is_default": r.is_default(),
+            })
+        return result
+
+    # ── 8. Invite Tracker ─────────────────────────────────────
+
+    async def get_invites(self, guild_id: int) -> list[dict]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return []
+        try:
+            invites = await guild.invites()
+            self._invite_cache[guild_id] = [{"code": i.code, "uses": i.uses, "inviter": str(i.inviter)} for i in invites]
+            result = []
+            for inv in invites:
+                result.append({
+                    "code": inv.code,
+                    "uses": inv.uses,
+                    "max_uses": inv.max_uses,
+                    "inviter": str(inv.inviter),
+                    "inviter_id": inv.inviter.id if inv.inviter else 0,
+                    "channel": str(inv.channel) if inv.channel else "?",
+                    "created": inv.created_at.strftime("%Y-%m-%d %H:%M") if inv.created_at else "",
+                    "expires": inv.expires_at.strftime("%Y-%m-%d %H:%M") if inv.expires_at else "never",
+                    "url": inv.url,
+                })
+            return result
+        except discord.Forbidden:
+            return []
+        except Exception:
+            return []
+
+    async def get_invite_stats(self, guild_id: int) -> list[dict]:
+        invites = await self.get_invites(guild_id)
+        inviter_stats: dict[str, dict] = {}
+        for inv in invites:
+            inviter = inv.get("inviter", "Unknown")
+            if inviter not in inviter_stats:
+                inviter_stats[inviter] = {"inviter": inviter, "total_uses": 0, "invites": []}
+            inviter_stats[inviter]["total_uses"] += inv.get("uses", 0)
+            inviter_stats[inviter]["invites"].append(inv)
+        leaderboard = sorted(inviter_stats.values(), key=lambda x: x["total_uses"], reverse=True)
+        return leaderboard
+
+    # ── 9. Voice Connected ────────────────────────────────────
+
+    def get_voice_connected(self, guild_id: int) -> list[dict]:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return []
+        result = []
+        for vc in guild.voice_channels:
+            members = [m for m in vc.members if not m.bot]
+            if members:
+                result.append({
+                    "channel_id": vc.id,
+                    "channel_name": vc.name,
+                    "member_count": len(members),
+                    "members": [{"id": m.id, "name": m.display_name, "status": str(m.status)} for m in members],
+                })
+        return result
+
+    def get_voice_stats(self, guild_id: int) -> dict:
+        guild = self.get_guild(guild_id)
+        if not guild:
+            return {"total_in_voice": 0, "active_channels": 0, "channels": []}
+        total = 0
+        active = []
+        for vc in guild.voice_channels:
+            non_bot = [m for m in vc.members if not m.bot]
+            if non_bot:
+                total += len(non_bot)
+                active.append({"channel_id": vc.id, "channel_name": vc.name, "count": len(non_bot)})
+        return {
+            "total_in_voice": total,
+            "active_channels": len(active),
+            "channels": active,
+        }
+
+    # ── 10. Bot Status Page ───────────────────────────────────
+
+    def get_bot_status(self) -> dict:
+        uptime_secs = int(_time.time() - self._connect_time)
+        h = uptime_secs // 3600
+        m = (uptime_secs % 3600) // 60
+        s = uptime_secs % 60
+        total_members = sum(g.member_count or 0 for g in self.guilds)
+        return {
+            "uptime": f"{h}h {m}m {s}s",
+            "uptime_seconds": uptime_secs,
+            "guilds": len(self.guilds),
+            "members": total_members,
+            "version": "2.0",
+            "latency": round(self.client.latency * 1000, 2) if self.client else 0,
+            "status": "connected" if self.ready else "disconnected",
+        }
+
+    # ── 11. Command Usage Stats ───────────────────────────────
+
+    def get_command_stats(self, limit: int = 20) -> list[dict]:
+        sorted_cmds = sorted(self.command_stats.items(), key=lambda x: x[1], reverse=True)[:limit]
+        total = sum(self.command_stats.values())
+        return [{"command": cmd, "count": count, "percent": round(count / total * 100, 1) if total else 0} for cmd, count in sorted_cmds]
+
+    # ── 12. Error Dashboard ───────────────────────────────────
+
+    def log_error(self, error_type: str, message: str, guild_id: int = None, user_id: int = None):
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": error_type,
+            "message": str(message)[:500],
+            "guild_id": guild_id,
+            "guild_name": "",
+            "user_id": user_id,
+            "user_name": "",
+        }
+        if guild_id:
+            g = self.get_guild(guild_id)
+            if g:
+                entry["guild_name"] = g.name
+        if user_id and self.client:
+            u = self.client.get_user(user_id)
+            if u:
+                entry["user_name"] = str(u)
+        self.error_log.insert(0, entry)
+        self.error_log = self.error_log[:500]
+
+    def get_errors(self, limit: int = 50) -> list[dict]:
+        return self.error_log[:limit]
+
+    def clear_errors(self):
+        self.error_log.clear()
+
+    # ── 13. Performance Monitor ───────────────────────────────
+
+    def get_performance(self) -> dict:
+        import os
+        try:
+            import psutil
+            proc = psutil.Process(os.getpid())
+            mem = proc.memory_info().rss / (1024 * 1024)
+            cpu = proc.cpu_percent(interval=0.1)
+        except ImportError:
+            mem = 0
+            cpu = 0
+        uptime_secs = int(_time.time() - self._connect_time)
+        total_members = sum(g.member_count or 0 for g in self.guilds)
+        api_latency = 0
+        if self.client and self.client.ws:
+            api_latency = round(self.client.ws.latency * 1000, 2)
+        return {
+            "latency": round(self.client.latency * 1000, 2) if self.client else 0,
+            "api_latency": api_latency,
+            "memory_mb": round(mem, 2),
+            "cpu_percent": round(cpu, 2),
+            "guilds": len(self.guilds),
+            "members": total_members,
+            "uptime": uptime_secs,
+        }
+
+    # ── 14. Scheduled Messages (cron-based) ───────────────────
+
+    def add_scheduled_message(self, channel_id: int, message: str, cron_expr: str) -> tuple[bool, str]:
+        entry = {
+            "channel_id": channel_id,
+            "message": message,
+            "cron_expr": cron_expr,
+            "enabled": True,
+            "last_run": None,
+        }
+        self.scheduled_messages.append(entry)
+        return True, f"تمت إضافة الرسالة المجدولة: {cron_expr}"
+
+    def remove_scheduled_message(self, index: int) -> tuple[bool, str]:
+        if 0 <= index < len(self.scheduled_messages):
+            removed = self.scheduled_messages.pop(index)
+            return True, f"تم حذف الرسالة: {removed.get('message', '')[:30]}..."
+        return False, "غير موجود"
+
+    def get_scheduled_messages(self) -> list[dict]:
+        return list(self.scheduled_messages)
+
+    def _parse_cron_field(self, field: str, current_val: int, min_val: int, max_val: int) -> bool:
+        if field == "*":
+            return True
+        if field.isdigit():
+            return int(field) == current_val
+        if "/" in field:
+            parts = field.split("/")
+            step = int(parts[1])
+            return current_val % step == 0
+        if "-" in field:
+            lo, hi = field.split("-")
+            return int(lo) <= current_val <= int(hi)
+        if "," in field:
+            return current_val in [int(x) for x in field.split(",")]
+        return False
+
+    def _cron_matches(self, cron_expr: str, now: datetime) -> bool:
+        parts = cron_expr.strip().split()
+        if len(parts) != 5:
+            return False
+        return (
+            self._parse_cron_field(parts[0], now.minute, 0, 59) and
+            self._parse_cron_field(parts[1], now.hour, 0, 23) and
+            self._parse_cron_field(parts[2], now.day, 1, 31) and
+            self._parse_cron_field(parts[3], now.month, 1, 12) and
+            self._parse_cron_field(parts[4], now.isoweekday() % 7, 0, 6)
+        )
+
+    async def _scheduled_worker_cron(self):
+        await asyncio.sleep(60)
+        while True:
+            try:
+                now = datetime.now()
+                for entry in self.scheduled_messages:
+                    if not entry.get("enabled"):
+                        continue
+                    last = entry.get("last_run")
+                    if last:
+                        try:
+                            last_dt = datetime.fromisoformat(last)
+                            if (now - last_dt).total_seconds() < 50:
+                                continue
+                        except Exception:
+                            pass
+                    if self._cron_matches(entry.get("cron_expr", ""), now):
+                        ch = self.client.get_channel(entry["channel_id"])
+                        if ch:
+                            try:
+                                await ch.send(f"📅 **رسالة مجدولة:**\n{entry['message']}")
+                                entry["last_run"] = now.isoformat()
+                                self._log_activity(f"📅 cron: {entry['message'][:40]}")
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            await asyncio.sleep(60)
+
+    # ── 15. Cross-Server Announce ─────────────────────────────
+
+    async def cross_announce(self, message: str, guild_ids: list[int] = None) -> dict:
+        sent = 0
+        failed = 0
+        guilds = guild_ids if guild_ids else [g.id for g in self.guilds]
+        for gid in guilds:
+            ch_id = self.log_channels.get(gid)
+            if not ch_id:
+                guild = self.get_guild(gid)
+                if guild and guild.system_channel:
+                    ch_id = guild.system_channel.id
+            if not ch_id:
+                failed += 1
+                continue
+            ch = self.client.get_channel(ch_id) if self.client else None
+            if not ch:
+                failed += 1
+                continue
+            try:
+                await ch.send(f"📢 **إعلان عام:**\n{message}")
+                sent += 1
+            except Exception:
+                failed += 1
+        return {"sent": sent, "failed": failed, "total": len(guilds)}
+
+    # ── 16. API Rate Monitor ──────────────────────────────────
+
+    def track_api_call(self, endpoint: str, status: int):
+        self.api_calls.append({
+            "timestamp": _time.time(),
+            "endpoint": endpoint,
+            "status": status,
+        })
+        if len(self.api_calls) > 10000:
+            self.api_calls = self.api_calls[-5000:]
+
+    def get_api_rate_stats(self) -> dict:
+        now = _time.time()
+        last_minute = [c for c in self.api_calls if now - c["timestamp"] <= 60]
+        last_hour = [c for c in self.api_calls if now - c["timestamp"] <= 3600]
+        total = len(last_hour)
+        errors = sum(1 for c in last_hour if c["status"] >= 400)
+        return {
+            "calls_per_minute": len(last_minute),
+            "calls_per_hour": total,
+            "error_count": errors,
+            "error_rate": round(errors / total * 100, 2) if total else 0,
+            "total_tracked": len(self.api_calls),
+        }
+
+    # ── Hook: Track music plays ───────────────────────────────
+
+    async def _track_play_hook(self, guild_id: int, title: str, requester: str, duration: int):
+        self._track_music_play(guild_id, title, requester, duration)
+
 
 bot_manager = BotManager()
 
@@ -2906,3 +4751,37 @@ class TicketCloseView(discord.ui.View):
     @discord.ui.button(label="🔒 إغلاق التذكرة", style=discord.ButtonStyle.danger, emoji="🔒")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.bot_manager._handle_ticket_close(interaction)
+
+
+class VerificationView(discord.ui.View):
+    def __init__(self, bot_manager: BotManager):
+        super().__init__(timeout=None)
+        self.bot_manager = bot_manager
+
+    @discord.ui.button(label="✅ Verify", style=discord.ButtonStyle.success, custom_id="verify_button")
+    async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.bot_manager._handle_verification(interaction)
+
+
+class GiveawayView(discord.ui.View):
+    def __init__(self, bot_manager: BotManager, giveaway_id: int):
+        super().__init__(timeout=None)
+        self.bot_manager = bot_manager
+        self.giveaway_id = giveaway_id
+
+    @discord.ui.button(label="🎉 Enter", style=discord.ButtonStyle.primary, custom_id="giveaway_enter")
+    async def enter_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user_id = interaction.user.id
+        for gw in self.bot_manager.giveaways:
+            if gw["id"] == self.giveaway_id and not gw.get("ended"):
+                entries = gw.get("entries", [])
+                if user_id in entries:
+                    entries.remove(user_id)
+                    await interaction.response.send_message("❌ تم إزالتك من الإيفنت", ephemeral=True)
+                else:
+                    entries.append(user_id)
+                    gw["entries"] = entries
+                    self.bot_manager._save_giveaways()
+                    await interaction.response.send_message("✅ تم تسجيلك في الإيفنت!", ephemeral=True)
+                return
+        await interaction.response.send_message("❌ الإيفنت منتهي أو غير موجود", ephemeral=True)

@@ -2164,6 +2164,913 @@ function clearEmbedForm() {
   UI.toast("info", "🗑 تم مسح جميع الحقول");
 }
 
+/* ── Login ─────────────────────────────────────────────────── */
+async function viewLogin() {
+  const view = $("view");
+  view.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;min-height:80vh;padding:20px">
+      <div class="card glass neon-frame" style="max-width:420px;width:100%;padding:32px">
+        <div style="text-align:center;margin-bottom:28px">
+          <div class="logo-ring" style="margin:0 auto 12px"><span>⚡</span></div>
+          <h2 class="gradient-text" style="margin:0;font-size:24px">NEON CORTEX</h2>
+          <div style="color:var(--text-dim);font-size:13px;margin-top:6px">سجّل الدخول للتحكم بالبوت</div>
+        </div>
+        <div class="field"><label>اسم المستخدم</label><input id="loginUser" class="input" placeholder="اسم المستخدم" autocomplete="username" /></div>
+        <div class="field"><label>كلمة المرور</label><input id="loginPass" class="input" type="password" placeholder="كلمة المرور" autocomplete="current-password" /></div>
+        <div id="loginError" style="color:var(--red);font-size:13px;margin-bottom:10px;display:none"></div>
+        <button class="btn btn-primary w-full" onclick="doLogin()" id="loginBtn">تسجيل الدخول</button>
+      </div>
+    </div>`;
+  $("loginPass").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  $("loginUser").addEventListener("keydown", e => { if (e.key === "Enter") $("loginPass").focus(); });
+}
+
+async function doLogin() {
+  const user = $("loginUser").value.trim();
+  const pass = $("loginPass").value;
+  const errEl = $("loginError");
+  const btn = $("loginBtn");
+  if (!user || !pass) { errEl.textContent = "أدخل اسم المستخدم وكلمة المرور"; errEl.style.display = "block"; return; }
+  btn.textContent = "جاري تسجيل الدخول...";
+  btn.disabled = true;
+  errEl.style.display = "none";
+  try {
+    await API.login(user, pass);
+    UI.toast("success", "✅ تم تسجيل الدخول بنجاح");
+    App.state.loggedIn = true;
+    window.location.hash = "#dashboard";
+    window.location.reload();
+  } catch (e) {
+    errEl.textContent = e.message || "فشل تسجيل الدخول";
+    errEl.style.display = "block";
+    btn.textContent = "تسجيل الدخول";
+    btn.disabled = false;
+  }
+}
+
+/* ── Anti-Nuke ─────────────────────────────────────────────── */
+async function viewAntinuke() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass neon-frame">
+      <h3>🛡️ نظام الحماية من التدمير (Anti-Nuke)</h3>
+      <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+        <div><b>تفعيل الحماية</b><div style="font-size:12px;color:var(--text-faint)">حماية السيرفر من الحذف والإنشاء الجماعي</div></div>
+        <label class="toggle"><input type="checkbox" id="anEnabled" /><span class="slider"></span></label>
+      </div>
+      <div class="section-title">📊 الحدود القصوى</div>
+      <div class="grid grid-3">
+        <div class="field"><label>حد حذف القنوات</label><input id="anChanDel" type="range" min="1" max="20" value="5" oninput="$('anChanDelVal').textContent=this.value" /><div class="range-val" id="anChanDelVal">5</div></div>
+        <div class="field"><label>حد حذف الرولات</label><input id="anRoleDel" type="range" min="1" max="10" value="3" oninput="$('anRoleDelVal').textContent=this.value" /><div class="range-val" id="anRoleDelVal">3</div></div>
+        <div class="field"><label>حد إنشاء القنوات</label><input id="anChanCreate" type="range" min="1" max="20" value="5" oninput="$('anChanCreateVal').textContent=this.value" /><div class="range-val" id="anChanCreateVal">5</div></div>
+      </div>
+      <div class="grid grid-2" style="margin-top:12px">
+        <div class="field"><label>حد الطرد</label><input id="anKick" type="range" min="1" max="10" value="3" oninput="$('anKickVal').textContent=this.value" /><div class="range-val" id="anKickVal">3</div></div>
+        <div class="field"><label>حد الحظر</label><input id="anBan" type="range" min="1" max="10" value="3" oninput="$('anBanVal').textContent=this.value" /><div class="range-val" id="anBanVal">3</div></div>
+      </div>
+      <div class="field" style="margin-top:14px"><label>إجراء رد الفعل</label><select id="anAction" class="input">
+        <option value="kick">👢 طرد المخالف</option>
+        <option value="ban">⛔ حظر المخالف</option>
+      </select></div>
+      <button class="btn btn-primary w-full" onclick="saveAntinuke()">💾 حفظ إعدادات الحماية</button>
+    </div>`;
+  try {
+    const cfg = (await API.getAntinuke(curGuild())).config || {};
+    $("anEnabled").checked = cfg.enabled || false;
+    $("anChanDel").value = cfg.max_channel_delete || 5;
+    $("anChanDelVal").textContent = cfg.max_channel_delete || 5;
+    $("anRoleDel").value = cfg.max_role_delete || 3;
+    $("anRoleDelVal").textContent = cfg.max_role_delete || 3;
+    $("anChanCreate").value = cfg.max_channel_create || 5;
+    $("anChanCreateVal").textContent = cfg.max_channel_create || 5;
+    $("anKick").value = cfg.max_kick || 3;
+    $("anKickVal").textContent = cfg.max_kick || 3;
+    $("anBan").value = cfg.max_ban || 3;
+    $("anBanVal").textContent = cfg.max_ban || 3;
+    if (cfg.action) $("anAction").value = cfg.action;
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+async function saveAntinuke() {
+  const cfg = {
+    enabled: $("anEnabled").checked,
+    max_channel_delete: parseInt($("anChanDel").value),
+    max_role_delete: parseInt($("anRoleDel").value),
+    max_channel_create: parseInt($("anChanCreate").value),
+    max_kick: parseInt($("anKick").value),
+    max_ban: parseInt($("anBan").value),
+    action: $("anAction").value,
+  };
+  try { await App.task(API.setAntinuke(curGuild(), cfg)); UI.toast("success", "✅ تم حفظ إعدادات الحماية"); } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Verification System ───────────────────────────────────── */
+async function viewVerification() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>✅ نظام التحقق (Verification)</h3>
+      <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+        <div><b>تفعيل التحقق</b><div style="font-size:12px;color:var(--text-faint)">يُلزم الأعضاء الجدد بالتحقق قبل الدخول</div></div>
+        <label class="toggle"><input type="checkbox" id="vfEnabled" /><span class="slider"></span></label>
+      </div>
+      <div class="grid grid-2">
+        <div class="field"><label>قناة التحقق</label><select id="vfChannel" class="input"></select></div>
+        <div class="field"><label>رول التحقق</label><select id="vfRole" class="input"></select></div>
+      </div>
+      <div class="field"><label>نوع التحقق</label><select id="vfType" class="input">
+        <option value="button">🔘 زر</option>
+        <option value="captcha">🔢 كابتشا</option>
+      </select></div>
+      <div class="field"><label>رسالة الترحيب</label><textarea id="vfWelcomeMsg" class="input" rows="2">مرحباً بك! اضغط الزر أدناه للتحقق والدخول.</textarea></div>
+      <div class="field"><label>رسالة النجاح</label><input id="vfSuccessMsg" class="input" value="✅ تمت التحقق بنجاح! أهلاً بك في السيرفر." /></div>
+      <div class="field"><label>رسالة الفشل</label><input id="vfFailMsg" class="input" value="❌ فشل التحقق. حاول مرة أخرى." /></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="saveVerification()">💾 حفظ الإعدادات</button>
+        <button class="btn btn-cyan" onclick="sendVerificationPanel()">📤 إرسال لوحة التحقق</button>
+      </div>
+    </div>`;
+  $("vfChannel").innerHTML = await channelOptions("text");
+  try {
+    const rolesResp = await API.guildRoles(curGuild());
+    const roles = (rolesResp.roles || []).filter(r => !r.default);
+    $("vfRole").innerHTML = `<option value="">— اختر رول —</option>` + roles.map(r => `<option value="${r.id}">🎭 ${esc(r.name)}</option>`).join("");
+    const cfg = (await API.getVerification(curGuild())).config || {};
+    $("vfEnabled").checked = cfg.enabled || false;
+    if (cfg.channel_id && $("vfChannel").querySelector(`option[value="${cfg.channel_id}"]`)) $("vfChannel").value = cfg.channel_id;
+    if (cfg.role_id) $("vfRole").value = String(cfg.role_id);
+    if (cfg.type) $("vfType").value = cfg.type;
+    if (cfg.welcome_msg) $("vfWelcomeMsg").value = cfg.welcome_msg;
+    if (cfg.success_msg) $("vfSuccessMsg").value = cfg.success_msg;
+    if (cfg.fail_msg) $("vfFailMsg").value = cfg.fail_msg;
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+async function saveVerification() {
+  const cfg = {
+    enabled: $("vfEnabled").checked,
+    channel_id: $("vfChannel").value,
+    role_id: $("vfRole").value,
+    type: $("vfType").value,
+    welcome_msg: $("vfWelcomeMsg").value,
+    success_msg: $("vfSuccessMsg").value,
+    fail_msg: $("vfFailMsg").value,
+  };
+  try { await App.task(API.setVerification(curGuild(), cfg)); UI.toast("success", "✅ تم حفظ إعدادات التحقق"); } catch (e) { UI.toast("error", e.message); }
+}
+
+async function sendVerificationPanel() {
+  const ch = $("vfChannel").value;
+  if (!ch) return UI.toast("warn", "اختر قناة التحقق");
+  try { await App.task(API.sendVerificationPanel(curGuild(), ch)); UI.toast("success", "✅ تم إرسال لوحة التحقق"); } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Reaction Roles ────────────────────────────────────────── */
+async function viewReactionRoles() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>🎭 الأدوار بالتفاعل (Reaction Roles)</h3>
+      <div class="field"><label>القناة</label><select id="rrChannel" class="input"></select></div>
+      <div class="field"><label>معرف الرسالة (Message ID)</label><input id="rrMsgId" class="input" placeholder="1234567890" /></div>
+      <div class="section-title">🔗 أزواج الرول والإيموجي</div>
+      <div id="rrPairs"></div>
+      <button class="btn btn-ghost btn-sm" onclick="addRrPair()" style="margin-bottom:14px">➕ إضافة زوج</button>
+      <button class="btn btn-primary w-full" onclick="saveReactionRoles()">💾 حفظ الإعدادات</button>
+    </div>`;
+  $("rrChannel").innerHTML = await channelOptions("text");
+  window._rrPairs = [];
+  addRrPair();
+}
+
+function addRrPair() {
+  if (!window._rrPairs) window._rrPairs = [];
+  const idx = window._rrPairs.length;
+  window._rrPairs.push({ role: "", emoji: "" });
+  const box = $("rrPairs");
+  box.insertAdjacentHTML("beforeend", `
+    <div class="field-row" id="rrPair${idx}" style="margin-bottom:8px">
+      <div class="field" style="flex:2"><label>رول #${idx + 1}</label><select id="rrRole${idx}" class="input"></select></div>
+      <div class="field" style="flex:1"><label>إيموجي</label><input id="rrEmoji${idx}" class="input" placeholder="😀" /></div>
+      <button class="btn btn-danger btn-sm" style="margin-top:22px" onclick="removeRrPair(${idx})">✕</button>
+    </div>`);
+  API.guildRoles(curGuild()).then(data => {
+    const roles = (data.roles || []).filter(r => !r.default);
+    const sel = $(`rrRole${idx}`);
+    if (sel) sel.innerHTML = `<option value="">— اختر —</option>` + roles.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join("");
+  });
+}
+
+function removeRrPair(idx) {
+  const el = $(`rrPair${idx}`);
+  if (el) el.remove();
+  if (window._rrPairs && window._rrPairs[idx]) window._rrPairs[idx] = null;
+}
+
+async function saveReactionRoles() {
+  const ch = $("rrChannel").value;
+  const msgId = $("rrMsgId").value.trim();
+  if (!ch || !msgId) return UI.toast("warn", "أكمل القناة ومعرف الرسالة");
+  const pairs = [];
+  if (window._rrPairs) {
+    window._rrPairs.forEach((_, i) => {
+      if (!window._rrPairs[i]) return;
+      const role = $(`rrRole${i}`) ? $(`rrRole${i}`).value : "";
+      const emoji = $(`rrEmoji${i}`) ? $(`rrEmoji${i}`).value.trim() : "";
+      if (role && emoji) pairs.push({ role_id: role, emoji });
+    });
+  }
+  if (!pairs.length) return UI.toast("warn", "أضف زوج رول/إيموجي واحد على الأقل");
+  try { await App.task(API.setReactionRoles(curGuild(), { channel_id: ch, message_id: msgId, pairs })); UI.toast("success", "✅ تم حفظ إعدادات الأدوار بالتفاعل"); } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Giveaways ─────────────────────────────────────────────── */
+async function viewGiveaways() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card glass">
+        <h3>🎉 إنشاء سحب جديد</h3>
+        <div class="field"><label>القناة</label><select id="gwChannel" class="input"></select></div>
+        <div class="field"><label>الجائزة</label><input id="gwPrize" class="input" placeholder="مثال: نيترو" /></div>
+        <div class="field-row">
+          <div class="field"><label>عدد الفائزين</label><input id="gwWinners" type="number" class="input" value="1" min="1" max="20" /></div>
+          <div class="field"><label>المدة (دقائق)</label><input id="gwDuration" type="number" class="input" value="60" min="1" /></div>
+        </div>
+        <button class="btn btn-primary w-full" onclick="createGiveaway()">🎉 بدء السحب</button>
+      </div>
+      <div class="card glass">
+        <h3>📋 السحب النشطة</h3>
+        <div id="gwList" class="list" style="max-height:400px"></div>
+      </div>
+    </div>`;
+  $("gwChannel").innerHTML = await channelOptions("text");
+  await loadGiveaways();
+}
+
+async function loadGiveaways() {
+  const box = $("gwList");
+  try {
+    const data = await API.getGiveaways(curGuild());
+    box.innerHTML = data.giveaways.length ? data.giveaways.map(g => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">🎉 ${esc(g.prize)}</div>
+          <div class="li-sub">${g.winners} فائز${g.active ? " · 🟢 نشط" : " · 🔴 منتهي"} · ${esc(g.ends_at || "")}</div>
+        </div>
+        <div class="li-actions">
+          ${g.active ? `<button class="btn btn-success btn-sm" onclick="endGiveaway('${g.id}')">🏁 إنهاء</button>` : ""}
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">🎉</div><div>لا سحب نشطة</div></div>`;
+  } catch (e) { box.innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+async function createGiveaway() {
+  const ch = $("gwChannel").value;
+  const prize = $("gwPrize").value.trim();
+  const winners = parseInt($("gwWinners").value) || 1;
+  const duration = parseInt($("gwDuration").value) || 60;
+  if (!ch || !prize) return UI.toast("warn", "أكمل القناة والجائزة");
+  try { await App.task(API.createGiveaway(curGuild(), { channel_id: ch, prize, winners, duration })); $("gwPrize").value = ""; await loadGiveaways(); } catch (e) { UI.toast("error", e.message); }
+}
+
+async function endGiveaway(id) {
+  try { await App.task(API.endGiveaway(curGuild(), id)); await loadGiveaways(); } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Level System ──────────────────────────────────────────── */
+async function viewLevels() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card glass">
+        <h3>📈 نظام المستويات</h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>تفعيل نظام المستويات</b></div>
+          <label class="toggle"><input type="checkbox" id="lvEnabled" /><span class="slider"></span></label>
+        </div>
+        <div class="field"><label>XP لكل رسالة</label><input id="lvXpPerMsg" type="number" class="input" value="15" min="1" max="100" /></div>
+        <div class="field"><label>قناة ترقية المستوى</label><select id="lvChannel" class="input"></select></div>
+        <div class="section-title">🎯 رولات حسب المستوى</div>
+        <div id="lvRoles"></div>
+        <button class="btn btn-ghost btn-sm" onclick="addLevelRole()">➕ إضافة رول مستوى</button>
+        <button class="btn btn-primary w-full" style="margin-top:14px" onclick="saveLevels()">💾 حفظ الإعدادات</button>
+      </div>
+      <div class="card glass">
+        <h3>🏆 لوحة الصدارة</h3>
+        <div id="lvLeaderboard" class="list" style="max-height:500px"></div>
+      </div>
+    </div>`;
+  $("lvChannel").innerHTML = await channelOptions("text");
+  window._lvRoles = [];
+  try {
+    const cfg = (await API.getLevels(curGuild())).config || {};
+    $("lvEnabled").checked = cfg.enabled || false;
+    $("lvXpPerMsg").value = cfg.xp_per_message || 15;
+    if (cfg.channel_id && $("lvChannel").querySelector(`option[value="${cfg.channel_id}"]`)) $("lvChannel").value = cfg.channel_id;
+    if (cfg.level_roles && cfg.level_roles.length) {
+      cfg.level_roles.forEach(lr => { window._lvRoles.push(lr); });
+    }
+    await renderLevelRoles();
+    await loadLeaderboard();
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+function addLevelRole() {
+  if (!window._lvRoles) window._lvRoles = [];
+  const idx = window._lvRoles.length;
+  window._lvRoles.push({ level: 1, role_id: "" });
+  renderLevelRoles();
+}
+
+function removeLevelRole(idx) {
+  if (window._lvRoles) window._lvRoles.splice(idx, 1);
+  renderLevelRoles();
+}
+
+async function renderLevelRoles() {
+  const box = $("lvRoles");
+  if (!box) return;
+  const rolesResp = await API.guildRoles(curGuild());
+  const roles = (rolesResp.roles || []).filter(r => !r.default);
+  box.innerHTML = window._lvRoles.map((lr, i) => `
+    <div class="field-row" style="margin-bottom:8px">
+      <div class="field" style="flex:1"><label>المستوى</label><input type="number" class="input" value="${lr.level}" min="1" onchange="window._lvRoles[${i}].level=parseInt(this.value)" /></div>
+      <div class="field" style="flex:2"><label>الرول</label><select class="input" onchange="window._lvRoles[${i}].role_id=this.value">
+        <option value="">— اختر —</option>
+        ${roles.map(r => `<option value="${r.id}" ${lr.role_id === r.id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}
+      </select></div>
+      <button class="btn btn-danger btn-sm" style="margin-top:22px" onclick="removeLevelRole(${i})">✕</button>
+    </div>`).join("");
+}
+
+async function saveLevels() {
+  const cfg = {
+    enabled: $("lvEnabled").checked,
+    xp_per_message: parseInt($("lvXpPerMsg").value) || 15,
+    channel_id: $("lvChannel").value,
+    level_roles: (window._lvRoles || []).filter(lr => lr.role_id),
+  };
+  try { await App.task(API.setLevels(curGuild(), cfg)); UI.toast("success", "✅ تم حفظ إعدادات المستويات"); } catch (e) { UI.toast("error", e.message); }
+}
+
+async function loadLeaderboard() {
+  const box = $("lvLeaderboard");
+  try {
+    const data = await API.getLeaderboard(curGuild());
+    box.innerHTML = data.leaderboard && data.leaderboard.length ? data.leaderboard.map((e, i) => `
+      <div class="list-item">
+        <div style="width:30px;text-align:center;font-size:14px;color:${i < 3 ? "var(--amber)" : "var(--text-dim)"};font-weight:800;flex-shrink:0">${i + 1}</div>
+        <div class="li-info">
+          <div class="li-title">${esc(e.display_name || e.name || e.id)}</div>
+          <div class="li-sub">مستوى ${e.level} · ${e.xp} XP</div>
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">🏆</div><div>لا بيانات بعد</div></div>`;
+  } catch (e) { box.innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+/* ── Custom Commands ───────────────────────────────────────── */
+async function viewCustomCommands() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card glass">
+        <h3>➕ إضافة أمر مخصص</h3>
+        <div class="field"><label>اسم الأمر (بدون !)</label><input id="ccName" class="input" placeholder="مثال: hello" /></div>
+        <div class="field"><label>الرد</label><textarea id="ccResponse" class="input" rows="3" placeholder="مرحباً {user}!"></textarea></div>
+        <div class="field"><label>النوع</label><select id="ccType" class="input">
+          <option value="text">📝 نص</option>
+          <option value="embed">📦 Embed</option>
+        </select></div>
+        <button class="btn btn-success w-full" onclick="addCustomCommand()">➕ إضافة الأمر</button>
+      </div>
+      <div class="card glass">
+        <h3>📋 الأوامر المخصصة</h3>
+        <div id="ccList" class="list" style="max-height:400px"></div>
+      </div>
+    </div>`;
+  await loadCustomCommands();
+}
+
+async function loadCustomCommands() {
+  const box = $("ccList");
+  try {
+    const data = await API.getCustomCommands(curGuild());
+    box.innerHTML = data.commands && data.commands.length ? data.commands.map(c => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">${c.type === "embed" ? "📦" : "📝"} !${esc(c.name)}</div>
+          <div class="li-sub">${esc((c.response || "").slice(0, 60))}${(c.response || "").length > 60 ? "..." : ""}</div>
+        </div>
+        <div class="li-actions">
+          <button class="btn btn-danger btn-sm" onclick="deleteCustomCommand('${esc(c.name)}')">🗑</button>
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">📝</div><div>لا أوامر مخصصة</div></div>`;
+  } catch (e) { box.innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+async function addCustomCommand() {
+  const name = $("ccName").value.trim();
+  const response = $("ccResponse").value.trim();
+  const type = $("ccType").value;
+  if (!name || !response) return UI.toast("warn", "أكمل الاسم والرد");
+  try { await App.task(API.addCustomCommand(curGuild(), { name, response, type })); $("ccName").value = ""; $("ccResponse").value = ""; await loadCustomCommands(); } catch (e) { UI.toast("error", e.message); }
+}
+
+function deleteCustomCommand(name) {
+  UI.confirm("🗑️ حذف أمر", `هل تريد حذف أمر "!${name}"؟`, async () => {
+    try { await App.task(API.deleteCustomCommand(curGuild(), name)); await loadCustomCommands(); } catch (e) { UI.toast("error", e.message); }
+  });
+}
+
+/* ── Birthdays ─────────────────────────────────────────────── */
+async function viewBirthdays() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card glass">
+        <h3>🎂 نظام أعياد الميلاد</h3>
+        <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+          <div><b>تفعيل النظام</b><div style="font-size:12px;color:var(--text-faint)">إرسال رسالة تهنئة تلقائية</div></div>
+          <label class="toggle"><input type="checkbox" id="bdEnabled" /><span class="slider"></span></label>
+        </div>
+        <div class="field"><label>قناة التهنئة</label><select id="bdChannel" class="input"></select></div>
+        <button class="btn btn-primary w-full" onclick="saveBirthdays()">💾 حفظ الإعدادات</button>
+      </div>
+      <div class="card glass">
+        <h3>📋 أعياد الميلاد المسجلة</h3>
+        <div id="bdList" class="list" style="max-height:260px"></div>
+      </div>
+    </div>
+    <div class="card glass">
+      <h3>➕ إضافة عيد ميلاد</h3>
+      <div class="field-row">
+        <div class="field"><label>اسم العضو</label><input id="bdUser" class="input" placeholder="اكتب اسم العضو..." /></div>
+        <div class="field"><label>الشهر</label><select id="bdMonth" class="input">
+          <option value="1">يناير</option><option value="2">فبراير</option><option value="3">مارس</option>
+          <option value="4">أبريل</option><option value="5">مايو</option><option value="6">يونيو</option>
+          <option value="7">يوليو</option><option value="8">أغسطس</option><option value="9">سبتمبر</option>
+          <option value="10">أكتوبر</option><option value="11">نوفمبر</option><option value="12">ديسمبر</option>
+        </select></div>
+        <div class="field"><label>اليوم</label><select id="bdDay" class="input">${Array.from({length:31},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join("")}</select></div>
+      </div>
+      <button class="btn btn-success w-full" onclick="addBirthday()">🎂 إضافة عيد الميلاد</button>
+    </div>`;
+  $("bdChannel").innerHTML = await channelOptions("text");
+  try {
+    const cfg = (await API.getBirthdays(curGuild())).config || {};
+    $("bdEnabled").checked = cfg.enabled || false;
+    if (cfg.channel_id && $("bdChannel").querySelector(`option[value="${cfg.channel_id}"]`)) $("bdChannel").value = cfg.channel_id;
+    const list = cfg.birthdays || [];
+    const box = $("bdList");
+    box.innerHTML = list.length ? list.map((b, i) => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">🎂 ${esc(b.display_name || b.user_id)}</div>
+          <div class="li-sub">${b.month}/${b.day}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="removeBirthday(${i})">🗑</button>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">🎂</div><div>لا أعياد ميلاد مسجلة</div></div>`;
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+async function saveBirthdays() {
+  const cfg = { enabled: $("bdEnabled").checked, channel_id: $("bdChannel").value };
+  try { await App.task(API.setBirthdays(curGuild(), cfg)); UI.toast("success", "✅ تم حفظ إعدادات أعياد الميلاد"); } catch (e) { UI.toast("error", e.message); }
+}
+
+async function addBirthday() {
+  const user = $("bdUser").value.trim();
+  const month = parseInt($("bdMonth").value);
+  const day = parseInt($("bdDay").value);
+  if (!user) return UI.toast("warn", "اكتب اسم العضو");
+  try { await App.task(API.addBirthday(curGuild(), { user, month, day })); $("bdUser").value = ""; await viewBirthdays(); } catch (e) { UI.toast("error", e.message); }
+}
+
+function removeBirthday(idx) {
+  UI.confirm("🗑️ حذف", "حذف عيد الميلاد؟", async () => {
+    try { await App.task(API.removeBirthday(curGuild(), idx)); await viewBirthdays(); } catch (e) { UI.toast("error", e.message); }
+  });
+}
+
+/* ── AFK List ──────────────────────────────────────────────── */
+async function viewAfk() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>💤 قائمة AFK</h3>
+      <div id="afkList" class="list" style="max-height:500px"></div>
+    </div>`;
+  try {
+    const data = await API.getAfkList(curGuild());
+    const list = data.afk || [];
+    const box = $("afkList");
+    box.innerHTML = list.length ? list.map(a => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">💤 ${esc(a.display_name || a.user_id)}</div>
+          <div class="li-sub">السبب: ${esc(a.reason || "غير محدد")} · منذ ${esc(a.since || "")}</div>
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">💤</div><div>لا يوجد أعضاء في وضع AFK حالياً</div></div>`;
+  } catch (e) { box.innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+/* ── Suggestions ───────────────────────────────────────────── */
+async function viewSuggestions() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>💡 نظام الاقتراحات</h3>
+      <div class="field" style="display:flex;align-items:center;justify-content:space-between">
+        <div><b>تفعيل الاقتراحات</b></div>
+        <label class="toggle"><input type="checkbox" id="sgEnabled" /><span class="slider"></span></label>
+      </div>
+      <div class="grid grid-2">
+        <div class="field"><label>قناة الاقتراحات</label><select id="sgChannel" class="input"></select></div>
+        <div class="field"><label>الحد الأدنى للأصوات</label><input id="sgMinVotes" type="number" class="input" value="5" min="1" /></div>
+      </div>
+      <button class="btn btn-primary w-full" onclick="saveSuggestions()">💾 حفظ الإعدادات</button>
+    </div>`;
+  $("sgChannel").innerHTML = await channelOptions("text");
+  try {
+    const cfg = (await API.getSuggestions(curGuild())).config || {};
+    $("sgEnabled").checked = cfg.enabled || false;
+    if (cfg.channel_id && $("sgChannel").querySelector(`option[value="${cfg.channel_id}"]`)) $("sgChannel").value = cfg.channel_id;
+    if (cfg.min_votes) $("sgMinVotes").value = cfg.min_votes;
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+async function saveSuggestions() {
+  const cfg = {
+    enabled: $("sgEnabled").checked,
+    channel_id: $("sgChannel").value,
+    min_votes: parseInt($("sgMinVotes").value) || 5,
+  };
+  try { await App.task(API.setSuggestions(curGuild(), cfg)); UI.toast("success", "✅ تم حفظ إعدادات الاقتراحات"); } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Webhooks ──────────────────────────────────────────────── */
+async function viewWebhooks() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card glass">
+        <h3>🔗 إنشاء Webhook</h3>
+        <div class="field"><label>القناة</label><select id="whChannel" class="input"></select></div>
+        <div class="field"><label>الاسم</label><input id="whName" class="input" placeholder="اسم الـ Webhook" /></div>
+        <button class="btn btn-success w-full" onclick="createWebhook()">➕ إنشاء</button>
+      </div>
+      <div class="card glass">
+        <h3>📋 قائمة الـ Webhooks</h3>
+        <div id="whList" class="list" style="max-height:400px"></div>
+      </div>
+    </div>`;
+  $("whChannel").innerHTML = await channelOptions("text");
+  await loadWebhooks();
+}
+
+async function loadWebhooks() {
+  const box = $("whList");
+  try {
+    const data = await API.getWebhooks(curGuild());
+    box.innerHTML = data.webhooks && data.webhooks.length ? data.webhooks.map(w => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">🔗 ${esc(w.name)}</div>
+          <div class="li-sub">#${esc(w.channel_name || w.channel_id)} · ID: ${w.id}</div>
+        </div>
+        <div class="li-actions">
+          <button class="btn btn-ghost btn-sm" onclick="copyText('${esc(w.url || "")}')" title="نسخ الرابط">📋</button>
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">🔗</div><div>لا Webhooks</div></div>`;
+  } catch (e) { box.innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+async function createWebhook() {
+  const ch = $("whChannel").value;
+  const name = $("whName").value.trim();
+  if (!ch || !name) return UI.toast("warn", "أكمل القناة والاسم");
+  try { await App.task(API.createWebhook(curGuild(), { channel_id: ch, name })); $("whName").value = ""; await loadWebhooks(); } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Emoji Manager ─────────────────────────────────────────── */
+async function viewEmojiManager() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>😀 إدارة الإيموجي</h3>
+      <div id="emMgrGrid" class="emoji-grid" style="margin-top:16px"></div>
+    </div>`;
+  try {
+    const data = await API.emojis(curGuild());
+    const box = $("emMgrGrid");
+    box.innerHTML = data.emojis.length ? data.emojis.map(e => `
+      <div class="emoji-tile">
+        <img src="${esc(e.url)}" alt="" />
+        <div class="e-name">${esc(e.name)}</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">الاستخدام: ${e.usage_count || 0}</div>
+      </div>`).join("")
+    : `<div class="empty" style="grid-column:1/-1"><div class="e-icon">😶</div><div>لا رموز في هذا السيرفر</div></div>`;
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Role Hierarchy ────────────────────────────────────────── */
+async function viewRoleHierarchy() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>🎭 هيكل الأدوار</h3>
+      <div id="rhTree" style="padding:16px"></div>
+    </div>`;
+  try {
+    const data = await API.getRolesManaged(curGuild());
+    const roles = (data.roles || []).sort((a, b) => b.position - a.position);
+    const box = $("rhTree");
+    box.innerHTML = roles.length ? roles.map((r, i) => `
+      <div class="list-item" style="margin-left:${i * 20}px;border-left:3px solid ${esc(r.color)}">
+        <div class="li-info">
+          <div class="li-title">${esc(r.name)}</div>
+          <div class="li-sub">المنصب: ${r.position} · الأعضاء: ${r.member_count}</div>
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">🎭</div><div>لا أدوار</div></div>`;
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Invite Tracker ────────────────────────────────────────── */
+async function viewInvites() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card glass">
+        <h3>🏆 الصدارة — أكثر من دعا الأعضاء</h3>
+        <div id="invLeaderboard" class="list" style="max-height:400px"></div>
+      </div>
+      <div class="card glass">
+        <h3>🔗 الدعوات النشطة</h3>
+        <div id="invActive" class="list" style="max-height:400px"></div>
+      </div>
+    </div>`;
+  try {
+    const data = await API.getInvites(curGuild());
+    const lb = $("invLeaderboard");
+    const top = data.leaderboard || data.top_inviters || [];
+    lb.innerHTML = top.length ? top.map((t, i) => `
+      <div class="list-item">
+        <div style="width:30px;text-align:center;font-size:14px;color:${i < 3 ? "var(--amber)" : "var(--text-dim)"};font-weight:800;flex-shrink:0">${i + 1}</div>
+        <div class="li-info">
+          <div class="li-title">${esc(t.display_name || t.user_id)}</div>
+          <div class="li-sub">${t.uses || 0} دعوة</div>
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">🏆</div><div>لا بيانات</div></div>`;
+    const inv = $("invActive");
+    const invites = data.invites || [];
+    inv.innerHTML = invites.length ? invites.map(i => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">${esc(i.code || i.id)}</div>
+          <div class="li-sub">بواسطة ${esc(i.inviter || "مجهول")} · الاستخدامات: ${i.uses || 0}</div>
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">🔗</div><div>لا دعوات نشطة</div></div>`;
+  } catch (e) { UI.toast("error", e.message); }
+}
+
+/* ── Voice Connected ───────────────────────────────────────── */
+async function viewVoiceConnected() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>🔊 القنوات الصوتية المتصلة</h3>
+      <div id="vcConnected" class="list" style="max-height:500px"></div>
+    </div>`;
+  try {
+    const data = await API.guildChannels(curGuild());
+    const voiceChannels = (data.channels || []).filter(c => c.type === "voice");
+    const box = $("vcConnected");
+    box.innerHTML = voiceChannels.length ? voiceChannels.map(ch => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">🔊 ${esc(ch.name)}</div>
+          <div class="li-sub">${ch.connected_members && ch.connected_members.length ? ch.connected_members.map(m => esc(m.name || m.id)).join(" · ") : "فارغة"}</div>
+        </div>
+        <span class="chip ${ch.connected_members && ch.connected_members.length ? "cyan" : ""}">${ch.connected_members ? ch.connected_members.length : 0}</span>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">🔇</div><div>لا قنوات صوتية</div></div>`;
+  } catch (e) { box.innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+/* ── Bot Status ────────────────────────────────────────────── */
+async function viewBotStatus() {
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass neon-frame" id="statusHero">
+      <div class="loading"><div class="loader"></div><span>جاري تحميل حالة البوت...</span></div>
+    </div>`;
+  try {
+    const st = await API.status();
+    const el = $("statusHero");
+    el.innerHTML = `
+      <div style="text-align:center;padding:20px 0">
+        <div class="logo-ring" style="margin:0 auto 16px"><span>⚡</span></div>
+        <h1 class="gradient-text" style="font-size:32px;margin:0">${esc(st.user || "NEON CORTEX")}</h1>
+        <div style="margin-top:8px">${st.ready ? '<span class="chip green">● متصل</span>' : '<span class="chip red">○ غير متصل</span>'}</div>
+      </div>
+      <div class="grid grid-4" style="margin-top:20px">
+        <div class="stat-tile"><div class="s-icon">⏱️</div><div class="s-value" style="font-size:20px">${st.uptime || "—"}</div><div class="s-label">وقت التشغيل</div></div>
+        <div class="stat-tile tile-cyan"><div class="s-icon">🌐</div><div class="s-value">${st.guilds || 0}</div><div class="s-label">السيرفرات</div></div>
+        <div class="stat-tile tile-magenta"><div class="s-icon">👥</div><div class="s-value">${st.members || 0}</div><div class="s-label">الأعضاء</div></div>
+        <div class="stat-tile tile-green"><div class="s-icon">📡</div><div class="s-value">${st.latency || "—"}ms</div><div class="s-label">البينج</div></div>
+      </div>
+      <div class="grid grid-3" style="margin-top:16px">
+        <div class="stat-tile tile-amber"><div class="s-icon">🔖</div><div class="s-value" style="font-size:16px">${esc(st.version || "—")}</div><div class="s-label">الإصدار</div></div>
+        <div class="stat-tile"><div class="s-icon">💾</div><div class="s-value" style="font-size:16px">${st.ram_mb ? st.ram_mb + " MB" : "—"}</div><div class="s-label">الرام</div></div>
+        <div class="stat-tile tile-green"><div class="s-icon">🖥️</div><div class="s-value" style="font-size:16px">${st.cpu_percent ? st.cpu_percent + "%" : "—"}</div><div class="s-label">المعالج</div></div>
+      </div>`;
+  } catch (e) { $("statusHero").innerHTML = `<div class="empty"><div class="e-icon">⚠️</div><div>${esc(e.message)}</div></div>`; }
+}
+
+/* ── Command Stats ─────────────────────────────────────────── */
+async function viewCmdStats() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <h3>📊 إحصائيات استخدام الأوامر</h3>
+      <div id="cmdStatsChart" style="padding:16px"></div>
+    </div>`;
+  try {
+    const data = await API.getCmdStats(curGuild());
+    const cmds = data.commands || data.stats || [];
+    const box = $("cmdStatsChart");
+    if (!cmds.length) { box.innerHTML = `<div class="empty"><div class="e-icon">📊</div><div>لا إحصائيات بعد</div></div>`; return; }
+    const maxCount = Math.max(...cmds.map(c => c.count || c.uses || 0), 1);
+    box.innerHTML = cmds.map(c => {
+      const name = c.name || c.command || "?";
+      const count = c.count || c.uses || 0;
+      const pct = Math.round((count / maxCount) * 100);
+      return `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <div style="min-width:120px;font-size:14px;font-weight:600;color:var(--cyan)">!${esc(name)}</div>
+          <div style="flex:1;height:28px;background:rgba(88,101,242,0.1);border-radius:8px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--cyan),var(--magenta));border-radius:8px;display:flex;align-items:center;justify-content:flex-end;padding:0 10px;font-size:12px;font-weight:700;color:#fff;min-width:fit-content">${count}</div>
+          </div>
+        </div>`;
+    }).join("");
+  } catch (e) { $("cmdStatsChart").innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+/* ── Error Dashboard ───────────────────────────────────────── */
+async function viewErrors() {
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <h3 style="margin:0">🚨 لوحة الأخطاء</h3>
+        <button class="btn btn-danger btn-sm" onclick="clearErrors()">🗑 مسح الكل</button>
+      </div>
+      <div id="errorList" class="list" style="max-height:500px"></div>
+    </div>`;
+  try {
+    const data = await API.getErrors();
+    const box = $("errorList");
+    const errs = data.errors || [];
+    box.innerHTML = errs.length ? errs.map(e => `
+      <div class="list-item" style="border-left:3px solid var(--red)">
+        <div class="li-info">
+          <div class="li-title">${esc(e.message || e.error || "خطأ غير معروف")}</div>
+          <div class="li-sub">${esc(e.timestamp || e.time || "")} ${e.source ? "· المصدر: " + esc(e.source) : ""}</div>
+        </div>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">✅</div><div>لا أخطاء مسجلة</div></div>`;
+  } catch (e) { $("errorList").innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+function clearErrors() {
+  UI.confirm("🗑️ مسح الأخطاء", "هل تريد مسح جميع الأخطاء المسجلة؟", async () => {
+    try { await App.task(API.clearErrors()); await viewErrors(); } catch (e) { UI.toast("error", e.message); }
+  });
+}
+
+/* ── Performance Monitor ───────────────────────────────────── */
+let _perfInterval = null;
+
+async function viewPerformance() {
+  if (_perfInterval) { clearInterval(_perfInterval); _perfInterval = null; }
+  const view = $("view");
+  view.innerHTML = `
+    <div class="card glass neon-frame" id="perfHero">
+      <div class="loading"><div class="loader"></div><span>جاري تحميل بيانات الأداء...</span></div>
+    </div>
+    <div class="grid grid-4" id="perfTiles"></div>
+    <div style="text-align:center;color:var(--text-faint);font-size:12px;margin-top:12px">يُحدّث تلقائياً كل 10 ثوانٍ</div>`;
+  await loadPerformance();
+  _perfInterval = setInterval(loadPerformance, 10000);
+}
+
+async function loadPerformance() {
+  const hero = $("perfHero");
+  const tiles = $("perfTiles");
+  if (!hero || !tiles) { if (_perfInterval) { clearInterval(_perfInterval); _perfInterval = null; } return; }
+  try {
+    const h = await API.health();
+    const uptime = h.uptime || 0;
+    const hrs = Math.floor(uptime / 3600);
+    const mins = Math.floor((uptime % 3600) / 60);
+    const secs = Math.floor(uptime % 60);
+    hero.innerHTML = `
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <div class="logo-ring small"><span>📡</span></div>
+        <div style="flex:1;min-width:200px">
+          <h2 class="gradient-text" style="margin:0;font-size:22px">مراقب الأداء</h2>
+          <div style="color:var(--text-dim);font-size:13px;margin-top:4px">آخر تحديث: ${new Date().toLocaleTimeString("ar-SA")}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadPerformance()">⟳ تحديث يدوي</button>
+      </div>`;
+    tiles.innerHTML = `
+      <div class="stat-tile tile-green"><div class="s-icon">🖥️</div><div class="s-value">${h.cpu_percent != null ? h.cpu_percent.toFixed(1) + "%" : "—"}</div><div class="s-label">المعالج</div></div>
+      <div class="stat-tile tile-magenta"><div class="s-icon">🧠</div><div class="s-value">${h.ram_percent != null ? h.ram_percent.toFixed(1) + "%" : "—"}</div><div class="s-label">الرام</div></div>
+      <div class="stat-tile tile-cyan"><div class="s-icon">📡</div><div class="s-value">${h.latency_ms != null ? h.latency_ms + "ms" : "—"}</div><div class="s-label">البينج</div></div>
+      <div class="stat-tile tile-amber"><div class="s-icon">⏱️</div><div class="s-value">${hrs}س ${mins}د ${secs}ث</div><div class="s-label">وقت التشغيل</div></div>`;
+  } catch (e) {
+    hero.innerHTML = `<div class="empty"><div class="e-icon">⚠️</div><div>${esc(e.message)}</div></div>`;
+  }
+}
+
+/* ── Scheduled Messages ────────────────────────────────────── */
+async function viewScheduled() {
+  if (!requireGuild()) return;
+  const view = $("view");
+  view.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card glass">
+        <h3>📅 إضافة رسالة مجدولة</h3>
+        <div class="field"><label>القناة</label><select id="schChannel" class="input"></select></div>
+        <div class="field"><label>الرسالة</label><textarea id="schMsg" class="input" rows="3" placeholder="اكتب الرسالة..."></textarea></div>
+        <div class="field"><label>تعبير Cron (HH:MM أو تعبير كرون)</label><input id="schCron" class="input" placeholder="مثال: 09:00 أو */30 * * * *" /></div>
+        <button class="btn btn-primary w-full" onclick="addScheduledMsg()">➕ إضافة</button>
+      </div>
+      <div class="card glass">
+        <h3>📋 الرسائل المجدولة</h3>
+        <div id="schList" class="list" style="max-height:400px"></div>
+      </div>
+    </div>`;
+  $("schChannel").innerHTML = await channelOptions("text");
+  await loadScheduledMsgs();
+}
+
+async function loadScheduledMsgs() {
+  const box = $("schList");
+  try {
+    const data = await API.getScheduledMessages(curGuild());
+    const list = data.messages || data.scheduled || [];
+    box.innerHTML = list.length ? list.map((s, i) => `
+      <div class="list-item">
+        <div class="li-info">
+          <div class="li-title">${esc((s.message || "").slice(0, 50))}${(s.message || "").length > 50 ? "..." : ""}</div>
+          <div class="li-sub">#${esc(s.channel_name || s.channel_id || "")} · ${esc(s.cron || s.time || "")}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="deleteScheduledMsg(${i})">🗑</button>
+      </div>`).join("")
+    : `<div class="empty"><div class="e-icon">📅</div><div>لا رسائل مجدولة</div></div>`;
+  } catch (e) { box.innerHTML = `<div class="empty"><div>${esc(e.message)}</div></div>`; }
+}
+
+async function addScheduledMsg() {
+  const ch = $("schChannel").value;
+  const msg = $("schMsg").value.trim();
+  const cron = $("schCron").value.trim();
+  if (!ch || !msg || !cron) return UI.toast("warn", "أكمل جميع البيانات");
+  try { await App.task(API.addScheduledMessage(curGuild(), { channel_id: ch, message: msg, cron })); $("schMsg").value = ""; $("schCron").value = ""; await loadScheduledMsgs(); } catch (e) { UI.toast("error", e.message); }
+}
+
+function deleteScheduledMsg(idx) {
+  UI.confirm("🗑️ حذف", "حذف هذه الرسالة المجدولة؟", async () => {
+    try { await App.task(API.deleteScheduledMessage(curGuild(), idx)); await loadScheduledMsgs(); } catch (e) { UI.toast("error", e.message); }
+  });
+}
+
 /* ── Router ─────────────────────────────────────────────────── */
 window.Views = {
   dashboard: viewDashboard,
@@ -2188,4 +3095,24 @@ window.Views = {
   stats: viewStats,
   welcomeCard: welcomeCardView,
   embedBuilder: embedBuilderView,
+  login: viewLogin,
+  antinuke: viewAntinuke,
+  verification: viewVerification,
+  reactionRoles: viewReactionRoles,
+  giveaways: viewGiveaways,
+  levels: viewLevels,
+  customCommands: viewCustomCommands,
+  birthdays: viewBirthdays,
+  afk: viewAfk,
+  suggestions: viewSuggestions,
+  webhooks: viewWebhooks,
+  emojiManager: viewEmojiManager,
+  roleHierarchy: viewRoleHierarchy,
+  invites: viewInvites,
+  voiceConnected: viewVoiceConnected,
+  botStatus: viewBotStatus,
+  cmdStats: viewCmdStats,
+  errors: viewErrors,
+  performance: viewPerformance,
+  scheduled: viewScheduled,
 };
